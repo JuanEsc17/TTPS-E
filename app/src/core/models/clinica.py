@@ -1,10 +1,17 @@
 """Clinica: patologias, sintomas, familiares, genes y variantes."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    Boolean, Enum, ForeignKey, Index, String, Text, UniqueConstraint, text,
+    Boolean,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -20,10 +27,10 @@ class Patologia(TimestampMixin, Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     nombre: Mapped[str] = mapped_column(String(120), unique=True)   # Fabry, Pompe, MPS1, Gaucher, ASMD
-    descripcion: Mapped[Optional[str]] = mapped_column(Text)
+    descripcion: Mapped[str | None] = mapped_column(Text)
 
-    sintomas: Mapped[list["PatologiaSintoma"]] = relationship(back_populates="patologia", cascade="all, delete-orphan")
-    genes: Mapped[list["Gen"]] = relationship(secondary="patologias_genes", back_populates="patologias")
+    sintomas: Mapped[list[PatologiaSintoma]] = relationship(back_populates="patologia", cascade="all, delete-orphan")
+    genes: Mapped[list[Gen]] = relationship(secondary="patologias_genes", back_populates="patologias")
 
 
 class Sintoma(Base):
@@ -67,7 +74,7 @@ class Familiar(Base):
     paciente_id: Mapped[int] = mapped_column(ForeignKey("pacientes.id", ondelete="CASCADE"), index=True)
     parentesco: Mapped[str] = mapped_column(String(60))
     nombre: Mapped[str] = mapped_column(String(150))
-    diagnostico_previo: Mapped[Optional[str]] = mapped_column(String(255))
+    diagnostico_previo: Mapped[str | None] = mapped_column(String(255))
 
     paciente: Mapped[Paciente] = relationship(back_populates="familiares")
     sintomas: Mapped[list[Sintoma]] = relationship(secondary="familiares_sintomas")
@@ -85,11 +92,11 @@ class Gen(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     simbolo: Mapped[str] = mapped_column(String(30), unique=True, index=True)
-    nombre: Mapped[Optional[str]] = mapped_column(String(255))
+    nombre: Mapped[str | None] = mapped_column(String(255))
     es_hallazgo_secundario: Mapped[bool] = mapped_column(Boolean, default=False)
 
     patologias: Mapped[list[Patologia]] = relationship(secondary="patologias_genes", back_populates="genes")
-    variantes: Mapped[list["Variante"]] = relationship(back_populates="gen", cascade="all, delete-orphan")
+    variantes: Mapped[list[Variante]] = relationship(back_populates="gen", cascade="all, delete-orphan")
 
 
 class PatologiaGen(Base):
@@ -106,7 +113,7 @@ class Variante(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     gen_id: Mapped[int] = mapped_column(ForeignKey("genes.id", ondelete="CASCADE"), index=True)
     notacion: Mapped[str] = mapped_column(String(120))     # ej. c.1935C>A
-    clinvar_id: Mapped[Optional[str]] = mapped_column(String(30), index=True)   # origen: ClinVar via Apigen
+    clinvar_id: Mapped[str | None] = mapped_column(String(30), index=True)   # origen: ClinVar via Apigen
     clasificacion: Mapped[ClasificacionVariante] = mapped_column(Enum(ClasificacionVariante))
 
     gen: Mapped[Gen] = relationship(back_populates="variantes")

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -35,14 +35,14 @@ class Analisis(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     estudio_id: Mapped[int] = mapped_column(ForeignKey("estudios.id"), index=True)
     tipo: Mapped[TipoAnalisis] = mapped_column(Enum(TipoAnalisis), default=TipoAnalisis.INICIAL)
-    bioinformatico_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
-    solicitado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("medicos.id"))   # en reanalisis
+    bioinformatico_id: Mapped[int | None] = mapped_column(ForeignKey("usuarios.id"))
+    solicitado_por_id: Mapped[int | None] = mapped_column(ForeignKey("medicos.id"))   # en reanalisis
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     estudio: Mapped[Estudio] = relationship(back_populates="analisis")
-    genes: Mapped[list["AnalisisGen"]] = relationship(back_populates="analisis", cascade="all, delete-orphan")
-    variantes: Mapped[list["AnalisisVariante"]] = relationship(back_populates="analisis", cascade="all, delete-orphan")
-    resultado: Mapped[Optional["Resultado"]] = relationship(back_populates="analisis", uselist=False)
+    genes: Mapped[list[AnalisisGen]] = relationship(back_populates="analisis", cascade="all, delete-orphan")
+    variantes: Mapped[list[AnalisisVariante]] = relationship(back_populates="analisis", cascade="all, delete-orphan")
+    resultado: Mapped[Resultado | None] = relationship(back_populates="analisis", uselist=False)
 
 
 class AnalisisGen(Base):

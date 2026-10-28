@@ -2,10 +2,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
-    Boolean, DateTime, Enum, ForeignKey, String, UniqueConstraint, func,
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    String,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -29,12 +35,12 @@ class Usuario(TimestampMixin, Base):
     # True hasta que el paciente cambia la contrasena inicial (escenario 20)
     debe_cambiar_password: Mapped[bool] = mapped_column(Boolean, default=False)
 
-    paciente: Mapped[Optional["Paciente"]] = relationship(back_populates="usuario", uselist=False)
-    medico: Mapped[Optional["Medico"]] = relationship(back_populates="usuario", uselist=False)
-    transportista: Mapped[Optional["Transportista"]] = relationship(back_populates="usuario", uselist=False)
-    dispositivos: Mapped[list["DispositivoConocido"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
-    codigos_verificacion: Mapped[list["CodigoVerificacion"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
-    avisos: Mapped[list["Aviso"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    paciente: Mapped[Paciente | None] = relationship(back_populates="usuario", uselist=False)
+    medico: Mapped[Medico | None] = relationship(back_populates="usuario", uselist=False)
+    transportista: Mapped[Transportista | None] = relationship(back_populates="usuario", uselist=False)
+    dispositivos: Mapped[list[DispositivoConocido]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    codigos_verificacion: Mapped[list[CodigoVerificacion]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
+    avisos: Mapped[list[Aviso]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
 
 
 class DispositivoConocido(Base):
@@ -73,7 +79,7 @@ class Aviso(Base):
     leido: Mapped[bool] = mapped_column(Boolean, default=False)
     canal: Mapped[CanalAviso] = mapped_column(Enum(CanalAviso), default=CanalAviso.APP)
     enviado: Mapped[bool] = mapped_column(Boolean, default=False)           # entregado por el modulo de avisos
-    enviado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    enviado_en: Mapped[datetime | None] = mapped_column(DateTime)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     usuario: Mapped[Usuario] = relationship(back_populates="avisos")

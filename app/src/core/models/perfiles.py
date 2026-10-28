@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -41,8 +41,8 @@ class Medico(Base):
 
     usuario: Mapped[Usuario] = relationship(back_populates="medico")
     especialidades: Mapped[list[Especialidad]] = relationship(secondary="medicos_especialidades")
-    pacientes: Mapped[list["Paciente"]] = relationship(back_populates="medico")
-    estudios: Mapped[list["Estudio"]] = relationship(back_populates="medico")
+    pacientes: Mapped[list[Paciente]] = relationship(back_populates="medico")
+    estudios: Mapped[list[Estudio]] = relationship(back_populates="medico")
 
 
 class Transportista(Base):
@@ -53,7 +53,7 @@ class Transportista(Base):
     provincia: Mapped[str] = mapped_column(String(80), unique=True)   # uno por provincia
 
     usuario: Mapped[Usuario] = relationship(back_populates="transportista")
-    ordenes_del_dia: Mapped[list["OrdenDelDia"]] = relationship(back_populates="transportista")
+    ordenes_del_dia: Mapped[list[OrdenDelDia]] = relationship(back_populates="transportista")
 
 
 class Paciente(Base):
@@ -68,15 +68,15 @@ class Paciente(Base):
     historia_clinica: Mapped[str] = mapped_column(Text)
     tipo_sospecha: Mapped[str] = mapped_column(String(80))
     # PDF devuelto por la API de familiograma (puede no existir, escenario 19)
-    familiograma_pdf_path: Mapped[Optional[str]] = mapped_column(String(500))
+    familiograma_pdf_path: Mapped[str | None] = mapped_column(String(500))
     # Si es menor de edad, el padre realiza el proceso
-    responsable_nombre: Mapped[Optional[str]] = mapped_column(String(200))
-    responsable_dni: Mapped[Optional[str]] = mapped_column(String(20))
+    responsable_nombre: Mapped[str | None] = mapped_column(String(200))
+    responsable_dni: Mapped[str | None] = mapped_column(String(20))
 
     usuario: Mapped[Usuario] = relationship(back_populates="paciente")
     medico: Mapped[Medico] = relationship(back_populates="pacientes")
-    diagnostico_presuntivo: Mapped["Patologia"] = relationship()
-    sintomas: Mapped[list["Sintoma"]] = relationship(secondary="pacientes_sintomas")
-    familiares: Mapped[list["Familiar"]] = relationship(back_populates="paciente", cascade="all, delete-orphan")
-    estudios: Mapped[list["Estudio"]] = relationship(back_populates="paciente")
-    turnos: Mapped[list["Turno"]] = relationship(back_populates="paciente")
+    diagnostico_presuntivo: Mapped[Patologia] = relationship()
+    sintomas: Mapped[list[Sintoma]] = relationship(secondary="pacientes_sintomas")
+    familiares: Mapped[list[Familiar]] = relationship(back_populates="paciente", cascade="all, delete-orphan")
+    estudios: Mapped[list[Estudio]] = relationship(back_populates="paciente")
+    turnos: Mapped[list[Turno]] = relationship(back_populates="paciente")
