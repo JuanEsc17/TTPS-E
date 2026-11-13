@@ -224,4 +224,3 @@ class ObraSocialClient:
 
 
 ObrasSocialesClient = ObraSocialClient
-

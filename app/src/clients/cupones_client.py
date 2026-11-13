@@ -134,4 +134,3 @@ class CuponesClient:
         }
         resp = self._peticion("POST", "/canjear_cupon", json=payload)
         return bool(resp.json())
-
