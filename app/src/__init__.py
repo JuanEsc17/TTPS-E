@@ -1,5 +1,6 @@
 """Application factory de Flask para el Sistema de Laboratorio de Exoma Clinico."""
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 from flask import Flask
@@ -10,7 +11,27 @@ from .web.api.turnos import turnos_bp
 load_dotenv()
 
 
+def _cargar_entorno(ruta_env: Path | None = None) -> None:
+    """Carga variables desde `.env` sin sobrescribir las ya definidas en el entorno."""
+    archivo_env = ruta_env or (Path(__file__).resolve().parents[2] / ".env")
+    if not archivo_env.is_file():
+        return
+
+    for linea in archivo_env.read_text(encoding="utf-8").splitlines():
+        linea = linea.strip()
+        if not linea or linea.startswith("#") or "=" not in linea:
+            continue
+        clave, valor = linea.split("=", 1)
+        clave = clave.strip()
+        valor = valor.strip()
+        if len(valor) >= 2 and valor[0] == valor[-1] and valor[0] in ("'", '"'):
+            valor = valor[1:-1]
+        if clave:
+            os.environ.setdefault(clave, valor)
+
+
 def create_app(config: dict | None = None) -> Flask:
+    _cargar_entorno()
     app = Flask(__name__)
 
     # Configuracion por defecto
