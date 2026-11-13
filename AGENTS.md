@@ -27,3 +27,4 @@
 - No alterar migraciones de base de datos ya aplicadas.
 - No poner lógica de negocio en `router` ni consultas SQL/ORM directas fuera de `repo`.
 - Todos los nombres de dominio (modelos, estados, servicios, variables de negocio) deben estar en **español**.
+- Al principio de cada respuesta indicar que skills se utilizaron para responder.
