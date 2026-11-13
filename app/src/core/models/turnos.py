@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -24,7 +24,7 @@ class CentroExtraccion(Base):
     latitud: Mapped[float] = mapped_column()
     longitud: Mapped[float] = mapped_column()
 
-    turnos: Mapped[list["Turno"]] = relationship(back_populates="centro")
+    turnos: Mapped[list[Turno]] = relationship(back_populates="centro")
 
 
 class Turno(Base):
@@ -37,7 +37,7 @@ class Turno(Base):
     estudio_id: Mapped[int] = mapped_column(ForeignKey("estudios.id"), index=True)
     inicio: Mapped[datetime] = mapped_column(DateTime)
     activo: Mapped[bool] = mapped_column(Boolean, default=True)     # False si se cancelo
-    asistio: Mapped[Optional[bool]] = mapped_column(Boolean)         # None hasta que pasa el turno; False = ausente
+    asistio: Mapped[bool | None] = mapped_column(Boolean)         # None hasta que pasa el turno; False = ausente
 
     centro: Mapped[CentroExtraccion] = relationship(back_populates="turnos")
     paciente: Mapped[Paciente] = relationship(back_populates="turnos")

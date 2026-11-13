@@ -133,15 +133,15 @@ El `Médico` tratante envía la nómina de familiares del paciente mediante `PUT
 
 ---
 
-### STEP 3: Envío de los Familiares a la API de familiograma y recepción del PDF
-**Actor**: `service` -> `clients` (`FamiliogramaClient.generar_familiograma_pdf`)
+### STEP 3: Envío de los Familiares a la API de familiograma y recepción de la imagen SVG
+**Actor**: `service` -> `clients` (`FamiliogramaClient.generar_familiograma`)
 **Action**:
-1. Construye el payload con los datos del `Paciente` (caso índice / probando: nombre, fecha de nacimiento, diagnóstico presuntivo y síntomas) y la lista de `Familiar`es (con su `parentesco`, `nombre`, `diagnostico_previo` y lista de `sintomas` con código `SNOMED` y descripción).
-2. Envía la petición HTTP `POST` a la `API de familiograma`.
-3. Recibe el documento PDF con el dibujo del `Familiograma` (genograma) que representa gráficamente el árbol familiar y el patrón de herencia.
+1. Construye el payload `personas` con los datos del `Paciente` (código de parentesco `0`: nombre, apellido, sexo, edad, diagnóstico presuntivo y síntomas) y la lista de `Familiar`es (códigos de parentesco `1..15` según `PARENTESCOS_MAP`, nombre, apellido, síntomas SNOMED y diagnóstico previo).
+2. Envía la petición HTTP `POST` a la `API de familiograma` con el header `x-api-key`.
+3. Recibe la respuesta con la imagen del `Familiograma` en formato SVG codificada en base64 (`image/svg+xml`).
 **Timeout**: 12s
-**Input**: `{ paciente, familiares: [ { parentesco, nombre, diagnostico_previo, sintomas } ] }`
-**Output on SUCCESS**: `{ pdf_bytes: b"%PDF-1.4..." }` -> GO TO STEP 4
+**Input**: `{ personas: [ { parentesco, nombre, apellido, ... } ] }`
+**Output on SUCCESS**: `{ advertencias: [], imagen: { tipo: "image/svg+xml", base64: "..." } }` -> GO TO STEP 4
 **Output on FAILURE**:
   - `FAILURE(external_api_timeout_or_5xx)`: La `API de familiograma` supera 12s o devuelve HTTP 5xx -> reintentar hasta 2 veces con backoff de 1s y 2s.
   - `FAILURE(external_api_unavailable_after_retries)`: Si tras los reintentos la `API de familiograma` sigue caída, **se conservan** los registros de `Familiar` y `FamiliarSintoma` en la base de datos (para que el `Médico` no pierda los datos cargados durante la consulta con el paciente), se deja `paciente.familiograma_pdf_path = None` y se devuelve HTTP `200 OK` con `familiograma_generado: false, warning: "FAMILIOGRAMA_API_PENDIENTE"` habilitando regeneración posterior (`POST /api/pacientes/{paciente_id}/familiograma/regenerar`).
@@ -154,25 +154,25 @@ El `Médico` tratante envía la nómina de familiares del paciente mediante `PUT
 
 ---
 
-### STEP 4: Almacenamiento del PDF del Familiograma y asociación al Paciente
-**Actor**: `service` -> File Storage -> `repo` (`PacienteRepo`) -> `PostgreSQL`
+### STEP 4: Almacenamiento de la imagen SVG del Familiograma y asociación al Paciente
+**Actor**: `service` -> File Storage (`FamiliogramaClient.guardar_svg`) -> `repo` (`PacienteRepo`) -> `PostgreSQL`
 **Action**:
-1. Guarda el PDF devuelto por la `API de familiograma` en almacenamiento persistente (`storage/familiogramas/familiograma_paciente_{paciente_id}.pdf`).
-2. Actualiza la columna `paciente.familiograma_pdf_path = "storage/familiogramas/familiograma_paciente_{paciente_id}.pdf"` en la tabla `pacientes`.
+1. Decodifica y guarda el SVG devuelto por la `API de familiograma` en almacenamiento persistente (`storage/familiogramas/familiograma_paciente_{paciente_id}.svg`).
+2. Actualiza la columna `paciente.familiograma_pdf_path = "storage/familiogramas/familiograma_paciente_{paciente_id}.svg"` en la tabla `pacientes`.
 3. Confirma (`commit`) la transacción en `PostgreSQL`.
 **Timeout**: 4s
-**Input**: `{ paciente_id: 15, pdf_bytes }`
-**Output on SUCCESS**: `{ paciente_id: 15, familiograma_pdf_path: "storage/familiogramas/familiograma_paciente_15.pdf" }` -> FIN DEL WORKFLOW.
+**Input**: `{ paciente_id: 15, base64_svg }`
+**Output on SUCCESS**: `{ paciente_id: 15, familiograma_path: "storage/familiogramas/familiograma_paciente_15.svg" }` -> FIN DEL WORKFLOW.
 **Output on FAILURE**:
-  - `FAILURE(io_or_database_error)`: Error al guardar el archivo PDF en disco o al actualizar `pacientes.familiograma_pdf_path` -> ejecutar `ABORT_CLEANUP` y retornar HTTP `500 Internal Server Error`.
+  - `FAILURE(io_or_database_error)`: Error al guardar el archivo SVG en disco o al actualizar `pacientes.familiograma_pdf_path` -> ejecutar `ABORT_CLEANUP` y retornar HTTP `500 Internal Server Error`.
 
 **Observable states during this step**:
-  - Customer/Actor (`Médico` y `Paciente`) sees: Familiares registrados y vista previa / enlace de descarga del PDF del `Familiograma` asociado a la ficha del `Paciente`.
-  - Operator sees: `paciente.familiograma_pdf_path` poblado y archivo PDF disponible.
+  - Customer/Actor (`Médico` y `Paciente`) sees: Familiares registrados y vista previa / renderizado del SVG del `Familiograma` asociado a la ficha del `Paciente`.
+  - Operator sees: `paciente.familiograma_pdf_path` poblado y archivo SVG disponible.
   - Database:
-    - Tabla `pacientes`: `familiograma_pdf_path = 'storage/familiogramas/familiograma_paciente_15.pdf'` para `id = 15`.
+    - Tabla `pacientes`: `familiograma_pdf_path = 'storage/familiogramas/familiograma_paciente_15.svg'` para `id = 15`.
     - Tablas `familiares` y `familiares_sintomas`: persistidas y confirmadas.
-  - Logs: `[paciente_service] familiograma_asociado paciente_id=15 pdf_path="storage/familiogramas/familiograma_paciente_15.pdf"`
+  - Logs: `[paciente_service] familiograma_asociado paciente_id=15 svg_path="storage/familiogramas/familiograma_paciente_15.svg"`
 
 ---
 

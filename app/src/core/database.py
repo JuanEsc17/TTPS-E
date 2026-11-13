@@ -1,5 +1,6 @@
 from flask_sqlalchemy_lite import SQLAlchemy
-from sqlalchemy.orm import DeclarativeBase
+
+from .models.base import Base
 
 db = SQLAlchemy()
 
@@ -9,22 +10,19 @@ def init_app(app):
     return db
 
 
-class BaseModel(DeclarativeBase):
-    """
-    Base model for all models.
-    """
-    __abstract__ = True
+# Alias para compatibilidad con BaseModel
+BaseModel = Base
 
 
 def create_tables():
-    # Importar el paquete registra todos los modelos en BaseModel.metadata
-    from src.core import models  # noqa: F401
+    # Importar el paquete registra todos los modelos en Base.metadata
+    from . import models  # noqa: F401
 
-    BaseModel.metadata.create_all(db.engine)
+    Base.metadata.create_all(db.engine)
 
 
 def reset_db():
-    from src.core import models  # noqa: F401
+    from . import models  # noqa: F401
 
-    BaseModel.metadata.drop_all(db.engine)
-    BaseModel.metadata.create_all(db.engine)
+    Base.metadata.drop_all(db.engine)
+    Base.metadata.create_all(db.engine)

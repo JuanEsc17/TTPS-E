@@ -1,7 +1,7 @@
 """Estudio de exoma y los genes a analizar."""
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -27,27 +27,27 @@ class Estudio(TimestampMixin, Base):
     patologia_sospechada_id: Mapped[int] = mapped_column(ForeignKey("patologias.id"))
     estado: Mapped[EstadoEstudio] = mapped_column(Enum(EstadoEstudio), default=EstadoEstudio.CREADO, index=True)
     quiere_hallazgos_secundarios: Mapped[bool] = mapped_column(Boolean, default=False)
-    obra_social_id: Mapped[Optional[int]] = mapped_column(ForeignKey("obras_sociales.id"))
+    obra_social_id: Mapped[int | None] = mapped_column(ForeignKey("obras_sociales.id"))
     es_pompe_urgente: Mapped[bool] = mapped_column(Boolean, default=False)   # Pompe y menor de 4 meses
     ausencias: Mapped[int] = mapped_column(Integer, default=0)               # llega a 5 -> vuelve a Creado
 
     paciente: Mapped[Paciente] = relationship(back_populates="estudios")
     medico: Mapped[Medico] = relationship(back_populates="estudios")
     patologia_sospechada: Mapped[Patologia] = relationship()
-    obra_social: Mapped[Optional[ObraSocial]] = relationship()
-    genes: Mapped[list["EstudioGen"]] = relationship(back_populates="estudio", cascade="all, delete-orphan")
-    presupuesto: Mapped[Optional["Presupuesto"]] = relationship(back_populates="estudio", uselist=False)
-    autorizaciones: Mapped[list["Autorizacion"]] = relationship(back_populates="estudio", order_by="Autorizacion.id")
-    demandas: Mapped[list["Demanda"]] = relationship(back_populates="estudio")
-    turnos: Mapped[list["Turno"]] = relationship(back_populates="estudio")
-    muestras: Mapped[list["Muestra"]] = relationship(back_populates="estudio", order_by="Muestra.id")
-    datos_crudos: Mapped[Optional["DatosCrudos"]] = relationship(back_populates="estudio", uselist=False)
-    analisis: Mapped[list["Analisis"]] = relationship(back_populates="estudio", order_by="Analisis.id")
+    obra_social: Mapped[ObraSocial | None] = relationship()
+    genes: Mapped[list[EstudioGen]] = relationship(back_populates="estudio", cascade="all, delete-orphan")
+    presupuesto: Mapped[Presupuesto | None] = relationship(back_populates="estudio", uselist=False)
+    autorizaciones: Mapped[list[Autorizacion]] = relationship(back_populates="estudio", order_by="Autorizacion.id")
+    demandas: Mapped[list[Demanda]] = relationship(back_populates="estudio")
+    turnos: Mapped[list[Turno]] = relationship(back_populates="estudio")
+    muestras: Mapped[list[Muestra]] = relationship(back_populates="estudio", order_by="Muestra.id")
+    datos_crudos: Mapped[DatosCrudos | None] = relationship(back_populates="estudio", uselist=False)
+    analisis: Mapped[list[Analisis]] = relationship(back_populates="estudio", order_by="Analisis.id")
 
     __table_args__ = (CheckConstraint("ausencias BETWEEN 0 AND 5"),)
 
     @property
-    def muestra_vigente(self) -> Optional["Muestra"]:
+    def muestra_vigente(self) -> Muestra | None:
         validas = [m for m in self.muestras if m.motivo_descarte is None]
         return validas[-1] if validas else None
 

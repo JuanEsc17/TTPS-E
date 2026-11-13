@@ -136,29 +136,29 @@ El `Médico` completa el formulario de alta de paciente en la vista de consulta 
 **Actor**: `service` (`paciente_service`) -> `clients` (`familiograma_client`) -> `API de familiograma`
 **Action**:
 - **Rama 4A (Sin familiares — Escenario 19)**: Si `input.familiares` es vacío (`[]`), omite la llamada externa, mantiene `pacientes.familiograma_pdf_path = None` y pasa directo a `STEP 5`.
-- **Rama 4B (Con familiares — Escenario 18)**: Si `input.familiares` contiene al menos un `Familiar`, invoca `POST /api/v1/familiogramas` en la `API de familiograma` enviando los datos del `Paciente` y la lista de `Familiares` (parentesco, nombre, síntomas SNOMED, diagnóstico previo). Guarda el PDF devuelto en el almacenamiento local (`storage/familiogramas/paciente_<id>.pdf`) y actualiza `pacientes.familiograma_pdf_path`.
+- **Rama 4B (Con familiares — Escenario 18)**: Si `input.familiares` contiene al menos un `Familiar`, invoca la `API de familiograma` enviando `personas` con los parentescos numéricos (código `0` para el `Paciente` y códigos `1..15` para los `Familiares` según `PARENTESCOS_MAP`). La API devuelve la imagen SVG codificada en base64 (`image/svg+xml`); el servicio la decodifica y la guarda en almacenamiento local (`storage/familiogramas/paciente_<id>.svg`), guardando la ruta en `pacientes.familiograma_pdf_path`.
 **Timeout**: `10s` por intento (máximo 3 intentos con exponential backoff: `1s`, `2s`, `4s`).
-**Input**: `paciente`, lista de `familiares` con sus `sintomas`.
+**Input**: `paciente`, lista de `familiares` formateada según `FamiliogramaClient`.
 **Output on SUCCESS**: `familiograma_pdf_path` actualizado en `pacientes` (o `None` si no hay familiares) -> `GO TO STEP 5`
 **Output on FAILURE**:
   - `FAILURE(transient_external_error)` / `FAILURE(timeout)`: La `API de familiograma` devuelve `5xx` o excede `10s` -> Reintentar hasta 2 veces adicionales (`1s`, `2s` backoff). Si agota reintentos -> `GO TO ABORT_CLEANUP` (revierte el alta para no dejar un paciente con familiares declarados pero sin familiograma generado, o devuelve error `502 Bad Gateway` con `retryable: true`).
-  - `FAILURE(permanent_external_error)`: La `API de familiograma` rechaza el árbol familiar con `400/422` (parentesco inválido) -> `GO TO ABORT_CLEANUP` -> `return 422 Unprocessable Entity` (`code: "FAMILIOGRAMA_INVALIDO"`).
+  - `FAILURE(permanent_external_error)`: La `API de familiograma` rechaza el árbol familiar con `400/422` (parentesco inválido o vínculos ambiguos) -> `GO TO ABORT_CLEANUP` -> `return 422 Unprocessable Entity` (`code: "FAMILIOGRAMA_INVALIDO"`).
 
 **Observable states during this step**:
-  - **Customer/Actor (`Médico`) sees**: `"Generando familiograma en PDF..."` (si cargó familiares).
-  - **Operator sees**: Llamada saliente hacia `API de familiograma`.
-  - **Database**: `pacientes.familiograma_pdf_path = 'storage/familiogramas/paciente_<id>.pdf'` (si Rama 4B) o `NULL` (si Rama 4A).
-  - **Logs**: `[familiograma_client] STEP 4 paciente_id=<id> status=200 pdf_path=<path>`
+  - **Customer/Actor (`Médico`) sees**: `"Generando familiograma en SVG..."` (si cargó familiares).
+  - **Operator sees**: Llamada saliente hacia `API de familiograma` con header `x-api-key`.
+  - **Database**: `pacientes.familiograma_pdf_path = 'storage/familiogramas/paciente_<id>.svg'` (si Rama 4B) o `NULL` (si Rama 4A).
+  - **Logs**: `[familiograma_client] STEP 4 paciente_id=<id> status=200 svg_path=<path>`
 
 ---
 
 ### STEP 5: Creación de `Aviso` y envío de correo con credenciales iniciales al `Paciente`
-**Actor**: `service` (`paciente_service`) -> `repo` (`usuario_repo`) + `clients` (`notificacion_client`)
+**Actor**: `service` (`paciente_service`) -> `repo` (`usuario_repo`) + `clients` (`email_client`)
 **Action**:
 1. Inserta en la tabla `avisos` una notificación para el `Paciente` (`usuario_id = usuario.id`, `canal = CanalAviso.MAIL`, `mensaje = "Bienvenido al Laboratorio de Exoma Clínico. Debe cambiar su contraseña inicial en su primer ingreso."`).
-2. Envía el correo electrónico al `email` del `Paciente` (o del padre/tutor si es menor) con el usuario (`email`) y la contraseña inicial temporal, indicando que el sistema exigirá `Cambiar contraseña inicial` en su primer ingreso.
-3. Si el envío de mail tiene éxito, actualiza `avisos.enviado = True` y `avisos.enviado_en = func.now()`, y hace `COMMIT` definitivo.
-**Timeout**: `5s` (con 2 reintentos de `1s` y `2s` ante fallo SMTP/HTTP).
+2. Invoca a `EmailClient.enviar_aviso` pasando asunto, mensaje, destinatario (`email` del paciente o responsable si es menor) y `Idempotency-Key` única (`alta-paciente-<usuario_id>`).
+3. Al recibir la respuesta exitosa (`202 Accepted` o `200 OK`), actualiza `avisos.enviado = True`, `avisos.enviado_en = func.now()` y registra el ID externo en el aviso, haciendo `COMMIT` definitivo.
+**Timeout**: `5s` (con 2 reintentos de `1s` y `2s` ante fallo de red).
 **Input**: `usuario.id`, `usuario.email`, `password_temporal`
 **Output on SUCCESS**: Respuesta `201 Created` con los datos del `Paciente` dado de alta -> `WORKFLOW COMPLETE`
 **Output on FAILURE**:
