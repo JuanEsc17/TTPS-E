@@ -1,6 +1,7 @@
-"""Tests unitarios para la capa de clientes de APIs externas (Familiograma, Email, Optimizacion)."""
+"""Tests unitarios para la capa de clientes de APIs externas."""
 import base64
 import json
+from datetime import date, datetime
 
 import httpx
 import pytest
@@ -9,10 +10,17 @@ from src.clients import (
     PARENTESCOS_POR_NOMBRE,
     ApigenClient,
     BioinformaticaClient,
+    CdssClient,
+    ChatbotClient,
     ClienteAutenticacionError,
+    ClienteConexionError,
+    ClienteServicioError,
     ClienteValidacionError,
+    CuponesClient,
     EmailClient,
     FamiliogramaClient,
+    FedexClient,
+    ObraSocialClient,
     OptimizacionClient,
     SnomedClient,
 )
@@ -387,3 +395,293 @@ def test_apigen_error_400_message():
         apigen.obtener_resultado_diagnostico("POMPE", ["GAA:c.99999A>G"])
     assert exc_info.value.codigo_http == 400
     assert "Variante inexistente" in exc_info.value.mensaje
+
+
+
+# ==========================================
+# 6. Tests CdssClient
+# ==========================================
+
+def test_cdss_flujo_completo():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            assert "X-API-Key" not in request.headers
+            return httpx.Response(200, json={"status": "ok", "db": "ok"})
+        assert request.headers.get("X-API-Key") == "cdss_key"
+        if request.url.path == "/api/v1/patologias":
+            return httpx.Response(200, json=[{"codigo": "FABRY", "nombre": "Enfermedad de Fabry"}])
+        if request.url.path == "/api/v1/estrategias":
+            return httpx.Response(200, json=["MAYOR_CANTIDAD_SINTOMAS", "MENOR_DIFERENCIA"])
+        if request.url.path == "/api/v1/diagnostico":
+            body = json.loads(request.content)
+            assert body == {"sintomas": ["247398009", "29738008"]}
+            return httpx.Response(
+                200,
+                json={"compatible": True, "estrategia": "MENOR_DIFERENCIA", "patologias": ["GAUCHER"]},
+            )
+        if request.url.path == "/api/v1/configuracion":
+            return httpx.Response(200, json={"cliente": "Grupo 1", "estrategia": "MENOR_DIFERENCIA"})
+        if request.url.path == "/api/v1/configuracion/estrategia":
+            assert request.method == "PUT"
+            assert json.loads(request.content) == {"estrategia": "MENOR_DIFERENCIA"}
+            return httpx.Response(200, json={"cliente": "Grupo 1", "estrategia": "MENOR_DIFERENCIA"})
+        return httpx.Response(404)
+
+    cdss = CdssClient(api_key="cdss_key", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert cdss.verificar_salud() == {"status": "ok", "db": "ok"}
+    assert cdss.listar_patologias()[0]["codigo"] == "FABRY"
+    assert "MENOR_DIFERENCIA" in cdss.listar_estrategias()
+    assert cdss.sugerir_diagnostico(["247398009", "29738008"])["compatible"] is True
+    assert cdss.obtener_configuracion()["cliente"] == "Grupo 1"
+    assert cdss.actualizar_estrategia("MENOR_DIFERENCIA")["estrategia"] == "MENOR_DIFERENCIA"
+
+
+def test_cdss_validacion_y_errores():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/patologias":
+            return httpx.Response(401, json={"detail": "API key invalida", "código": "API_KEY_INVALIDA"})
+        return httpx.Response(503, json={"detail": "DB sin conexion", "código": "SERVICIO_NO_DISPONIBLE"})
+
+    cdss = CdssClient(api_key="bad", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ClienteValidacionError):
+        cdss.sugerir_diagnostico([])
+    with pytest.raises(ClienteAutenticacionError) as exc_401:
+        cdss.listar_patologias()
+    assert exc_401.value.codigo_http == 401
+    with pytest.raises(ClienteServicioError) as exc_503:
+        cdss.verificar_salud()
+    assert exc_503.value.codigo_http == 503
+
+
+# ==========================================
+# 7. Tests ChatbotClient
+# ==========================================
+
+def test_chatbot_estado_y_mensaje():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            assert "x-chatbot-token" not in request.headers
+            return httpx.Response(200, json={"estado": "ok"})
+        assert request.headers.get("apikey") == "pub_key"
+        assert request.headers.get("x-chatbot-token") == "tok_grupo"
+        body = json.loads(request.content)
+        assert body == {"mensaje": "¿Qué es un exoma clínico?", "conversacion_id": None}
+        return httpx.Response(
+            200,
+            json={
+                "respuesta": "El exoma es...",
+                "conversacion_id": "conv-1",
+                "tipo": "respuesta",
+            },
+        )
+
+    bot = ChatbotClient(
+        apikey="pub_key",
+        token="tok_grupo",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert bot.verificar_estado() == {"estado": "ok"}
+    res = bot.enviar_mensaje("  ¿Qué es un exoma clínico?  ")
+    assert res["tipo"] == "respuesta"
+    assert res["conversacion_id"] == "conv-1"
+
+
+def test_chatbot_validacion_reintento_429_y_errores():
+    intentos = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal intentos
+        intentos += 1
+        if intentos == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"}, json={"detail": "Rate limit"})
+        return httpx.Response(
+            200,
+            json={"respuesta": "Ok tras espera", "conversacion_id": "c2", "tipo": "respuesta"},
+        )
+
+    bot = ChatbotClient(
+        apikey="pub",
+        token="tok",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(ClienteValidacionError):
+        bot.enviar_mensaje("   ")
+    with pytest.raises(ClienteValidacionError):
+        bot.enviar_mensaje("x" * 1001)
+
+    res = bot.enviar_mensaje("Hola")
+    assert intentos == 2
+    assert res["respuesta"] == "Ok tras espera"
+
+
+# ==========================================
+# 8. Tests CuponesClient
+# ==========================================
+
+def test_cupones_flujo_completo():
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers.get("X-API-Key") == "ecg_test"
+        assert "Authorization" not in request.headers
+        if request.url.path == "/functions/v1/cupones-api/cupones":
+            assert request.url.params["estado"] == "disponible"
+            return httpx.Response(200, json={"items": [], "total": 0, "limit": 20, "offset": 0})
+        if request.url.path == "/functions/v1/cupones-api/generar_cupones_gerencia":
+            body = json.loads(request.content)
+            assert body == {"p_gerente_id": "G-1", "p_cantidad": 1, "p_porcentaje_descuento": 20}
+            return httpx.Response(200, json=[{"codigo_cupon": "53399388", "porcentaje": 20}])
+        if request.url.path == "/functions/v1/cupones-api/asignar_cupon_a_medico":
+            return httpx.Response(200, json=True)
+        if request.url.path == "/functions/v1/cupones-api/asignar_cupon_a_paciente":
+            return httpx.Response(200, json=True)
+        if request.url.path == "/functions/v1/cupones-api/canjear_cupon":
+            return httpx.Response(200, json=True)
+        return httpx.Response(404)
+
+    cup = CuponesClient(api_key="ecg_test", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    assert cup.listar_cupones(estado="disponible")["total"] == 0
+    lote = cup.generar_cupones_gerencia("G-1", 1, 20)
+    assert lote[0]["codigo_cupon"] == "53399388"
+    assert cup.asignar_cupon_a_medico("G-1", "M-1", "53399388") is True
+    assert cup.asignar_cupon_a_paciente("M-1", "P-1", "53399388") is True
+    assert cup.canjear_cupon("P-1", "53399388") is True
+
+
+def test_cupones_errores_403_y_409():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/generar_cupones_gerencia"):
+            return httpx.Response(403, json={"code": "OTRO_GERENTE", "message": "Ya existe gerente"})
+        return httpx.Response(409, json={"code": "YA_USADO", "message": "Cupon ya canjeado"})
+
+    cup = CuponesClient(api_key="ecg_test", client=httpx.Client(transport=httpx.MockTransport(handler)))
+    with pytest.raises(ClienteValidacionError) as exc_403:
+        cup.generar_cupones_gerencia("G-2", 1, 10)
+    assert exc_403.value.codigo_http == 403
+    with pytest.raises(ClienteValidacionError) as exc_409:
+        cup.canjear_cupon("P-1", "53399388")
+    assert exc_409.value.codigo_http == 409
+
+
+# ==========================================
+# 9. Tests FedexClient
+# ==========================================
+
+def test_fedex_flujo_completo():
+    expected_auth = "Basic " + base64.b64encode(b"grupo01:secreto").decode("ascii")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/functions/v1/fedex/retiros" and request.method == "POST":
+            assert request.headers.get("Authorization") == expected_auth
+            body = json.loads(request.content)
+            assert body == {"lugar": "La Plata", "fecha_programada": "2026-12-15T15:00:00"}
+            return httpx.Response(
+                201,
+                json={"mensaje": "OK", "retiro": {"id": "uuid-1", "lugar": "La Plata"}},
+            )
+        if request.url.path == "/functions/v1/fedex/retiros" and request.method == "GET":
+            assert request.headers.get("Authorization") == expected_auth
+            assert request.url.params["pagina"] == "1"
+            return httpx.Response(200, json={"pagina": 1, "limite": 10, "total": 1, "retiros": []})
+        if request.url.path == "/functions/v1/fedex/retiros/uuid-1":
+            assert "Authorization" not in request.headers
+            return httpx.Response(200, json={"id": "uuid-1", "estado": "PROGRAMADO"})
+        return httpx.Response(404)
+
+    fedex = FedexClient(
+        usuario="grupo01",
+        password="secreto",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    creado = fedex.programar_retiro("La Plata", datetime(2026, 12, 15, 15, 0, 0))
+    assert creado["retiro"]["id"] == "uuid-1"
+    assert fedex.listar_retiros()["total"] == 1
+    assert fedex.consultar_retiro("uuid-1")["estado"] == "PROGRAMADO"
+
+
+def test_fedex_validacion_y_error_red():
+    fedex = FedexClient(usuario="grupo01", password="secreto")
+    with pytest.raises(ClienteValidacionError):
+        fedex.programar_retiro("La Plata", "2026-12-15T15:00:00Z")
+    with pytest.raises(ClienteValidacionError):
+        fedex.listar_retiros(pagina=0)
+
+    def handler_error(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("sin red", request=request)
+
+    fedex_offline = FedexClient(
+        usuario="grupo01",
+        password="secreto",
+        client=httpx.Client(transport=httpx.MockTransport(handler_error)),
+    )
+    with pytest.raises(ClienteConexionError):
+        fedex_offline.consultar_retiro("uuid-1")
+
+
+# ==========================================
+# 10. Tests ObraSocialClient
+# ==========================================
+
+def test_obra_social_flujo_completo(tmp_path):
+    pdf_file = tmp_path / "amparo.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 contenido")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/functions/v1/api/":
+            assert "x-api-key" not in request.headers
+            return httpx.Response(200, json={"servicio": "Obras Sociales", "version": "1.0.0"})
+        if request.url.path == "/functions/v1/api/obras-sociales":
+            assert request.headers.get("x-api-key") == "osk_test"
+            return httpx.Response(200, json={"datos": [{"id": "os-1", "nombre": "OSDE"}], "total": 1})
+        if request.url.path == "/functions/v1/api/solicitudes" and request.method == "POST":
+            body = json.loads(request.content)
+            assert body["fecha"] == "2026-11-13"
+            return httpx.Response(
+                201,
+                json={
+                    "id": "sol-1",
+                    "estado": "pendiente",
+                    "urls_simulacion": {
+                        "autorizar": "https://api.test/simulacion/tok-1/autorizar",
+                        "rechazar": "https://api.test/simulacion/tok-1/rechazar",
+                    },
+                },
+            )
+        if request.url.path == "/functions/v1/api/solicitudes/sol-1/demanda":
+            assert "multipart/form-data" in request.headers.get("content-type", "")
+            return httpx.Response(201, json={"id": "sol-1", "estado": "demanda_en_curso"})
+        if request.url.path == "/simulacion/tok-1/autorizar":
+            assert json.loads(request.content) == {"porcentaje": 90}
+            return httpx.Response(200, json={"id": "sol-1", "estado": "autorizada"})
+        if request.url.path == "/functions/v1/api/simulacion/tok-1/rechazar":
+            return httpx.Response(200, json={"id": "sol-1", "estado": "rechazada"})
+        return httpx.Response(404)
+
+    os_client = ObraSocialClient(
+        api_key="osk_test",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    assert os_client.verificar_estado()["version"] == "1.0.0"
+    assert os_client.listar_obras_sociales(buscar="osde")["datos"][0]["nombre"] == "OSDE"
+    sol = os_client.crear_solicitud("os-1", "Ana Perez", date(2026, 11, 13), "est-1")
+    assert sol["estado"] == "pendiente"
+    assert os_client.simular_rechazo("tok-1", "Falta documentacion")["estado"] == "rechazada"
+    assert os_client.presentar_demanda("sol-1", pdf_file)["estado"] == "demanda_en_curso"
+    assert os_client.simular_autorizacion(sol["urls_simulacion"]["autorizar"], 90)["estado"] == "autorizada"
+
+
+def test_obra_social_errores_y_limite_pdf():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            409,
+            json={"error": {"codigo": "ESTADO_INVALIDO", "mensaje": "Ya autorizada", "detalle": {}}},
+        )
+
+    os_client = ObraSocialClient(
+        api_key="osk_test",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    with pytest.raises(ClienteValidacionError):
+        os_client.presentar_demanda("sol-1", b"x" * (5 * 1024 * 1024 + 1))
+    with pytest.raises(ClienteValidacionError) as exc_409:
+        os_client.presentar_demanda("sol-1", b"%PDF-1.4 ok")
+    assert exc_409.value.codigo_http == 409
+    assert "Ya autorizada" in exc_409.value.mensaje
