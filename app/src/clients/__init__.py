@@ -1,4 +1,6 @@
 """Capa de Clientes HTTP para integraciones con APIs externas (TTPS-E)."""
+from dotenv import load_dotenv
+
 from .apigen_client import ApigenClient, BioinformaticaClient
 from .email_client import EmailClient
 from .exceptions import (
@@ -15,6 +17,8 @@ from .familiograma_client import (
 )
 from .optimizacion_client import OptimizacionClient
 from .snomed_client import SnomedClient
+
+load_dotenv()
 
 __all__ = [
     "PARENTESCOS_MAP",

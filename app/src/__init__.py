@@ -1,9 +1,13 @@
 """Application factory de Flask para el Sistema de Laboratorio de Exoma Clinico."""
 import os
 
+from dotenv import load_dotenv
 from flask import Flask
 
 from .core.database import db
+from .web.api.turnos import turnos_bp
+
+load_dotenv()
 
 
 def create_app(config: dict | None = None) -> Flask:
@@ -26,5 +30,9 @@ def create_app(config: dict | None = None) -> Flask:
 
     # Inicializar extensiones
     db.init_app(app)
+
+    # Registrar blueprints
+
+    app.register_blueprint(turnos_bp)
 
     return app
