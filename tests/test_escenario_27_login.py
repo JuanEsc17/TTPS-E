@@ -5,7 +5,6 @@ import httpx
 import jwt
 import pytest
 from sqlalchemy import select
-
 from src.clients import EmailClient
 from src.core.models import CodigoVerificacion, DispositivoConocido, Rol, Usuario
 from src.core.services.auth_service import RUTA_INICIO_POR_ROL

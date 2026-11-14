@@ -5,11 +5,13 @@ from flask.testing import FlaskClient
 from src import create_app
 from src.core.database import db
 from src.core.models.base import Base
+from src.core.services.seguridad import tokens_revocados
 
 
 @pytest.fixture
 def app() -> Flask:
     """Fixture que crea una aplicacion Flask configurada para testing en memoria."""
+    tokens_revocados.limpiar()
     application = create_app({
         "TESTING": True,
         "SQLALCHEMY_DATABASE_URI": "sqlite:///:memory:",
@@ -19,6 +21,7 @@ def app() -> Flask:
         Base.metadata.create_all(db.engine)
         yield application
         Base.metadata.drop_all(db.engine)
+    tokens_revocados.limpiar()
 
 
 @pytest.fixture

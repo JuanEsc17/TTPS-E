@@ -1,10 +1,16 @@
 """Utilidades de hash y emision de JWT."""
 import hashlib
+import hmac
+import re
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import jwt
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from .excepciones import ErrorDominio
 
 SCOPE_ACCESO_COMPLETO = "acceso_completo"
 SCOPE_CAMBIO_PASSWORD_INICIAL = "cambio_password_inicial"
@@ -25,6 +31,8 @@ def verificar_password(password_hash: str, password_plano: str) -> bool:
 def sha256_hex(texto: str) -> str:
     return hashlib.sha256(texto.strip().encode("utf-8")).hexdigest()
 
+def comparar_hashes(a: str, b: str) -> bool:
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 def emitir_token(
     secret_key: str,
@@ -47,3 +55,72 @@ def emitir_token(
     if dispositivo_hash:
         payload["dispositivo_hash"] = dispositivo_hash
     return jwt.encode(payload, secret_key, algorithm="HS256")
+
+_REGEX_LETRA = re.compile(r"[A-Za-z]")
+_REGEX_DIGITO = re.compile(r"\d")
+
+def validar_politica_password(password: str, codigo: str = "NUEVA_PASSWORD_INVALIDA") -> None:
+    if len(password) < 8 or len(password) > 128:
+        raise ErrorDominio(
+            "La contrasena debe tener entre 8 y 128 caracteres.",
+            codigo=codigo,
+            http_status=400
+        )
+    
+    if not _REGEX_LETRA.search(password) or not _REGEX_DIGITO.search(password):
+        raise ErrorDominio(
+            "La contrasena debe incluir al menos una letra y un numero.",
+            codigo=codigo,
+            http_status=400
+        )
+
+def decodificar_token(token: str, secret_key:str) -> dict[str, Any]:
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError as exc:
+        raise ErrorDominio(
+            "El token de sesion ha expirado.",
+            codigo="TOKEN_INVALIDO_O_EXPIRADO",
+            http_status=401,
+        ) from exc
+        
+    except jwt.InvalidTokenError as exc:
+        raise ErrorDominio(
+            "El token de sesion es invalido.",
+            codigo="TOKEN_INVALIDO_O_EXPIRADO",
+            http_status=401,
+        ) from exc
+    
+    if "sub" not in payload or "scope" not in payload:
+        raise ErrorDominio(
+            "Token de sesion incompleto.",
+            codigo="TOKEN_INVALIDO_O_EXPIRADO",
+            http_status=401
+        )
+    return payload
+
+class AlmacenTokensRevocados:
+    # shortcut: registro en memoria de proceso; migrar a Redis/BD si se corre con multiples workers
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._exp_por_jti: dict[str, float] = {}
+    
+    def revocar(self, jti: str, exp_ts: float) -> None:
+        ahora = datetime.now(UTC).timestamp()
+        with self._lock:
+            self._exp_por_jti = {k: v for k, v in self._exp_por_jti.items() if v > ahora}
+            if exp_ts > ahora:
+                self._exp_por_jti[jti] = float(exp_ts)
+    
+    def esta_revocado(self, jti: str) -> bool:
+        ahora = datetime.now(UTC).timestamp()
+        with self._lock:
+            self._exp_por_jti = {k: v for k, v in self._exp_por_jti.items() if v > ahora}
+            return jti in self._exp_por_jti
+    
+    def limpiar(self) -> None:
+        with self._lock:
+            self._exp_por_jti.clear()
+
+
+tokens_revocados = AlmacenTokensRevocados()

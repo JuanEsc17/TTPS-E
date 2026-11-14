@@ -48,3 +48,43 @@ def crear_codigo_verificacion(
     )
     db.session.add(codigo)
     return codigo
+
+def buscar_por_id(usuario_id: int, *, for_update: bool = False) -> Usuario | None:
+    stmt = select(Usuario).where(Usuario.id == usuario_id)
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.session.scalar(stmt)
+
+def registrar_dispositivo(usuario_id: int, identificador_hash: str) -> DispositivoConocido:
+    dispositivo = buscar_dispositivo(usuario_id, identificador_hash)
+
+    if dispositivo is not None:
+        actualizar_ultimo_acceso(dispositivo)
+        return dispositivo
+    
+    dispositivo = DispositivoConocido(
+        usuario_id=usuario_id,
+        identificador=identificador_hash,
+        ultimo_acceso=ahora_utc()
+    )
+    db.session.add(dispositivo)
+    return dispositivo
+
+def buscar_ultimo_codigo(
+    usuario_id: int,
+    dispositivo_hash: str,
+    *,
+    for_update: bool = False
+) -> CodigoVerificacion | None:
+    stmt = (
+        select(CodigoVerificacion)
+        .where(
+            CodigoVerificacion.usuario_id == usuario_id,
+            CodigoVerificacion.dispositivo_identificador == dispositivo_hash,
+        )
+        .order_by(CodigoVerificacion.id.desc())
+        .limit(1)
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.session.scalar(stmt)
