@@ -1,5 +1,6 @@
 """Utilidades de hash y emision de JWT."""
 import hashlib
+import hmac
 import re
 import threading
 import uuid
@@ -30,6 +31,8 @@ def verificar_password(password_hash: str, password_plano: str) -> bool:
 def sha256_hex(texto: str) -> str:
     return hashlib.sha256(texto.strip().encode("utf-8")).hexdigest()
 
+def comparar_hashes(a: str, b: str) -> bool:
+    return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 def emitir_token(
     secret_key: str,

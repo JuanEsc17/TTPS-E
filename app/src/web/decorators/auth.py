@@ -10,6 +10,7 @@ from src.core.services.excepciones import ErrorDominio
 from src.core.services.seguridad import (
     SCOPE_ACCESO_COMPLETO,
     SCOPE_CAMBIO_PASSWORD_INICIAL,
+    SCOPE_VERIFICAR_DISPOSITIVO,
     decodificar_token,
     tokens_revocados,
 )
@@ -46,6 +47,12 @@ def requiere_sesion(
                 )
             scope = str(payload.get("scope", ""))
             if scope not in scopes_permitidos:
+                if scope == SCOPE_VERIFICAR_DISPOSITIVO:
+                    raise ErrorDominio(
+                        "Debe verificar el ingreso desde esta maquina nueva antes de continuar.",
+                        codigo="DISPOSITIVO_NO_VERIFICADO",
+                        http_status=403,
+                    )                
                 if scope == SCOPE_CAMBIO_PASSWORD_INICIAL:
                     raise ErrorDominio(
                         "Debe cambiar su contrasena inicial antes de operar.",

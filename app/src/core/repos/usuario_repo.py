@@ -69,3 +69,22 @@ def registrar_dispositivo(usuario_id: int, identificador_hash: str) -> Dispositi
     )
     db.session.add(dispositivo)
     return dispositivo
+
+def buscar_ultimo_codigo(
+    usuario_id: int,
+    dispositivo_hash: str,
+    *,
+    for_update: bool = False
+) -> CodigoVerificacion | None:
+    stmt = (
+        select(CodigoVerificacion)
+        .where(
+            CodigoVerificacion.usuario_id == usuario_id,
+            CodigoVerificacion.dispositivo_identificador == dispositivo_hash,
+        )
+        .order_by(CodigoVerificacion.id.desc())
+        .limit(1)
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.session.scalar(stmt)

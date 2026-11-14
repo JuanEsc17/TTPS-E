@@ -1,11 +1,16 @@
 """Blueprint de autenticacion (/api/v1/auth)."""
 from flask import Blueprint, g, jsonify, request
 from src.core.services import auth_service
-from src.core.services.seguridad import SCOPE_CAMBIO_PASSWORD_INICIAL
+from src.core.services.seguridad import (
+    SCOPE_CAMBIO_PASSWORD_INICIAL,
+    SCOPE_VERIFICAR_DISPOSITIVO,
+)
 from src.web.decorators.auth import extraer_payload_opcional, requiere_sesion
 from src.web.validators.auth_validator import (
     CambiarPasswordInicialSchema,
     LoginSchema,
+    ReenviarCodigoSchema,
+    VerificarDispositivoSchema,
 )
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/v1/auth")
@@ -60,4 +65,31 @@ def me():
 def logout():
     payload = extraer_payload_opcional()
     resultado = auth_service.cerrar_sesion(payload)
+    return jsonify({"ok": True, **resultado}), 200
+
+
+@auth_bp.post("/verificar-dispositivo")
+@requiere_sesion(scopes_permitidos=(SCOPE_VERIFICAR_DISPOSITIVO,))
+def verificar_dispositivo():
+    payload = request.get_json(silent=True) or {}
+    datos = VerificarDispositivoSchema().load(payload)
+    resultado = auth_service.verificar_dispositivo(
+        usuario_id=g.usuario_actual.id,
+        codigo=datos["codigo"],
+        dispositivo_identificador=datos["dispositivo_identificador"],
+        token_payload=g.token_payload,
+    )
+    return jsonify({"ok": True, **resultado}), 200
+
+
+@auth_bp.post("/reenviar-codigo-dispositivo")
+@requiere_sesion(scopes_permitidos=(SCOPE_VERIFICAR_DISPOSITIVO,))
+def reenviar_codigo_dispositivo():
+    payload = request.get_json(silent=True) or {}
+    datos = ReenviarCodigoSchema().load(payload)
+    resultado = auth_service.reenviar_codigo_dispositivo(
+        usuario_id=g.usuario_actual.id,
+        dispositivo_identificador=datos["dispositivo_identificador"],
+        token_payload=g.token_payload,
+    )
     return jsonify({"ok": True, **resultado}), 200

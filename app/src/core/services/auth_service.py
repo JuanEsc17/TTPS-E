@@ -20,6 +20,7 @@ from src.core.services.seguridad import (
     SCOPE_ACCESO_COMPLETO,
     SCOPE_CAMBIO_PASSWORD_INICIAL,
     SCOPE_VERIFICAR_DISPOSITIVO,
+    comparar_hashes,
     emitir_token,
     hashear_password,
     sha256_hex,
@@ -87,6 +88,43 @@ def _enviar_codigo_mail(usuario: Usuario, codigo: str, email_client: EmailClient
             ) from exc
 
 
+def _crear_y_enviar_desafio(
+    usuario: Usuario,
+    dispositivo_hash: str,
+    email_client: EmailClient | None,
+) -> dict[str, Any]:
+    codigo_plano = f"{secrets.randbelow(1_000_000):06d}"
+    expira_en = usuario_repo.ahora_utc() + timedelta(minutes=10)
+    usuario_repo.crear_codigo_verificacion(
+        usuario_id=usuario.id,
+        codigo_hash=sha256_hex(codigo_plano),
+        dispositivo_hash=dispositivo_hash,
+        expira_en=expira_en,
+    )
+    try:
+        _enviar_codigo_mail(usuario, codigo_plano, email_client)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    challenge_token = emitir_token(
+        str(current_app.config["SECRET_KEY"]),
+        usuario_id=usuario.id,
+        rol=usuario.rol.value,
+        scope=SCOPE_VERIFICAR_DISPOSITIVO,
+        ttl_segundos=10 * 60,
+        dispositivo_hash=dispositivo_hash,
+    )
+    return {
+        "estado_login": "REQUIERE_VERIFICACION_DISPOSITIVO",
+        "requiere_cambio_password": False,
+        "requiere_verificacion_dispositivo": True,
+        "challenge_token": challenge_token,
+        "usuario": _serializar_usuario(usuario),
+    }
+
+
 def iniciar_sesion(
     *,
     email: str,
@@ -130,36 +168,7 @@ def iniciar_sesion(
     # Filtro 2: verificar si el equipo ya es conocido (si no, deriva al Escenario 26)
     dispositivo = usuario_repo.buscar_dispositivo(usuario.id, dispositivo_hash)
     if dispositivo is None:
-        codigo_plano = f"{secrets.randbelow(1_000_000):06d}"
-        expira_en = usuario_repo.ahora_utc() + timedelta(minutes=10)
-        usuario_repo.crear_codigo_verificacion(
-            usuario_id=usuario.id,
-            codigo_hash=sha256_hex(codigo_plano),
-            dispositivo_hash=dispositivo_hash,
-            expira_en=expira_en,
-        )
-        try:
-            _enviar_codigo_mail(usuario, codigo_plano, email_client)
-            db.session.commit()
-        except Exception:
-            db.session.rollback()
-            raise
-
-        challenge_token = emitir_token(
-            secret_key,
-            usuario_id=usuario.id,
-            rol=usuario.rol.value,
-            scope=SCOPE_VERIFICAR_DISPOSITIVO,
-            ttl_segundos=10 * 60,
-            dispositivo_hash=dispositivo_hash,
-        )
-        return {
-            "estado_login": "REQUIERE_VERIFICACION_DISPOSITIVO",
-            "requiere_cambio_password": False,
-            "requiere_verificacion_dispositivo": True,
-            "challenge_token": challenge_token,
-            "usuario": _serializar_usuario(usuario),
-        }
+        return _crear_y_enviar_desafio(usuario, dispositivo_hash, email_client)
 
     # Camino feliz: maquina conocida -> actualiza ultimo acceso y entrega sesion completa
     usuario_repo.actualizar_ultimo_acceso(dispositivo)
@@ -265,3 +274,98 @@ def cerrar_sesion(payload: dict[str, Any] | None) -> dict[str, Any]:
         "mensaje": "La sesion se ha cerrado correctamente.",
         "redirect_to": "/login",
     }
+
+
+def verificar_dispositivo(
+    *,
+    usuario_id: int,
+    codigo: str,
+    dispositivo_identificador: str,
+    token_payload: dict[str, Any],
+) -> dict[str, Any]:
+    dispositivo_hash = sha256_hex(dispositivo_identificador)
+    token_dispositivo_hash = str(token_payload.get("dispositivo_hash", ""))
+    if not token_dispositivo_hash or not comparar_hashes(dispositivo_hash, token_dispositivo_hash):
+        raise ErrorDominio(
+            "El codigo de verificacion ingresado es incorrecto.",
+            codigo="CODIGO_VERIFICACION_INCORRECTO",
+            http_status=401,
+        )
+
+    usuario = usuario_repo.buscar_por_id(usuario_id)
+    if usuario is None:
+        raise ErrorDominio("Usuario inexistente.", codigo="TOKEN_INVALIDO_O_EXPIRADO", http_status=401)
+
+    registro = usuario_repo.buscar_ultimo_codigo(usuario.id, dispositivo_hash, for_update=True)
+    if registro is None:
+        raise ErrorDominio(
+            "El codigo de verificacion ingresado es incorrecto.",
+            codigo="CODIGO_VERIFICACION_INCORRECTO",
+            http_status=401,
+        )
+    if registro.usado:
+        raise ErrorDominio(
+            "El codigo de verificacion ya fue utilizado. Solicite uno nuevo.",
+            codigo="CODIGO_YA_UTILIZADO",
+            http_status=409,
+        )
+    if registro.expira_en < usuario_repo.ahora_utc():
+        registro.usado = True
+        db.session.commit()
+        raise ErrorDominio(
+            "El codigo de verificacion ha expirado. Solicite uno nuevo.",
+            codigo="CODIGO_EXPIRADO",
+            http_status=410,
+        )
+    if not comparar_hashes(sha256_hex(codigo), registro.codigo_hash):
+        raise ErrorDominio(
+            "El codigo de verificacion ingresado es incorrecto.",
+            codigo="CODIGO_VERIFICACION_INCORRECTO",
+            http_status=401,
+        )
+
+    registro.usado = True
+    usuario_repo.registrar_dispositivo(usuario.id, dispositivo_hash)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    logger.info("[auth_service] dispositivo verificado usuario_id=%s rol=%s", usuario.id, usuario.rol.value)
+    token = emitir_token(
+        str(current_app.config["SECRET_KEY"]),
+        usuario_id=usuario.id,
+        rol=usuario.rol.value,
+        scope=SCOPE_ACCESO_COMPLETO,
+        ttl_segundos=8 * 3600,
+        dispositivo_hash=dispositivo_hash,
+    )
+    return {
+        "estado_login": "AUTENTICADO",
+        "dispositivo_verificado": True,
+        "access_token": token,
+        "ruta_inicio": RUTA_INICIO_POR_ROL[usuario.rol],
+        "usuario": _serializar_usuario(usuario),
+    }
+
+
+def reenviar_codigo_dispositivo(
+    *,
+    usuario_id: int,
+    dispositivo_identificador: str,
+    token_payload: dict[str, Any],
+    email_client: EmailClient | None = None,
+) -> dict[str, Any]:
+    dispositivo_hash = sha256_hex(dispositivo_identificador)
+    token_dispositivo_hash = str(token_payload.get("dispositivo_hash", ""))
+    if not token_dispositivo_hash or not comparar_hashes(dispositivo_hash, token_dispositivo_hash):
+        raise ErrorDominio(
+            "El dispositivo no coincide con el inicio de sesion pendiente.",
+            codigo="CODIGO_VERIFICACION_INCORRECTO",
+            http_status=401,
+        )
+    usuario = usuario_repo.buscar_por_id(usuario_id)
+    if usuario is None:
+        raise ErrorDominio("Usuario inexistente.", codigo="TOKEN_INVALIDO_O_EXPIRADO", http_status=401)
+    return _crear_y_enviar_desafio(usuario, dispositivo_hash, email_client)
