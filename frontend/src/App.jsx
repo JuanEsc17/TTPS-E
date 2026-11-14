@@ -3,6 +3,7 @@ import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react
 import { guardarSesion, leerSesion } from "./api/auth";
 import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
+import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -57,12 +58,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage sesion={sesion} onSesion={manejarSesion} />} />
         <Route
           path="/cambiar-password-inicial"
-          element={
-            <FlujoPendiente
-              titulo="Cambio de contraseña inicial requerido"
-              descripcion="Acá va la pantalla del Escenario 20 para establecer tu contraseña definitiva."
-            />
-          }
+          element={<CambiarPasswordInicialPage sesion={sesion} onSesion={manejarSesion} />}
         />
         <Route
           path="/verificar-dispositivo"

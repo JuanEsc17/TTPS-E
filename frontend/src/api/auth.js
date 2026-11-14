@@ -39,3 +39,32 @@ export async function loginRequest({ email, password }) {
     }
     return data
 }
+
+export async function cambiarPasswordInicialRequest({
+    tokenTemporal,
+    passwordInicial,
+    nuevaPassword,
+    confirmacionPassword,
+}) {
+    const resp = await fetch("/api/v1/auth/cambiar-password-inicial", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${tokenTemporal}`,
+        },
+        body: JSON.stringify({
+            password_inicial: passwordInicial,
+            nueva_password: nuevaPassword,
+            confirmacion_password: confirmacionPassword,
+            dispositivo_identificador: obtenerDispositivoId(),
+        })
+    })
+
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+        const err = new Error(data.error || "No se pudo actualizar la contrasena inicial.")
+        err.code = data.code
+        throw err
+    }
+    return data
+}
