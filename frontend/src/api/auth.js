@@ -68,3 +68,15 @@ export async function cambiarPasswordInicialRequest({
     }
     return data
 }
+
+export function limpiarSesion() {
+    sessionStorage.removeItem(KEY_SESION)
+}
+
+export async function logoutRequest(token) {
+    if (!token) return
+    await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+    }).catch(() => { })
+}

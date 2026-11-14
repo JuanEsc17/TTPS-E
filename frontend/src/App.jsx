@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { guardarSesion, leerSesion } from "./api/auth";
+import { guardarSesion, leerSesion, limpiarSesion, logoutRequest } from "./api/auth";
 import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
@@ -52,6 +52,15 @@ export default function App() {
     setSesion(nuevaSesion);
   }
 
+  async function manejarCerrarSesion() {
+    try {
+      await logoutRequest(sesion?.access_token)
+    } finally {
+      limpiarSesion()
+      setSesion(null)
+    }
+  }
+
   return (
     <BrowserRouter>
       <Routes>
@@ -70,7 +79,7 @@ export default function App() {
           }
         />
 
-        <Route element={<Layout sesion={sesion} />}>
+        <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}

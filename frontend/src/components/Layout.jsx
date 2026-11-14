@@ -28,12 +28,23 @@ function obtenerIniciales(usuario) {
     return (n + a).toUpperCase() || "U";
 }
 
-export default function Layout({ sesion }) {
+export default function Layout({ sesion, onCerrarSesion }) {
     const [menuAbierto, setMenuAbierto] = useState(false);
+    const [cerrando, setCerrando] = useState(false);
     const { pathname } = useLocation();
 
     if (!sesion?.access_token) {
         return <Navigate to="/login" replace />;
+    }
+
+    async function handleCerrarSesion() {
+        setCerrando(true);
+        setMenuAbierto(false);
+        try {
+            await onCerrarSesion?.();
+        } finally {
+            setCerrando(false);
+        }
     }
 
     const { usuario } = sesion;
@@ -70,8 +81,22 @@ export default function Layout({ sesion }) {
                 </nav>
             </div>
 
-            <p className="px-3 text-[11px] text-slate-400">Exoma Clínico · TTPS-E</p>
-        </div>
+            <div className="space-y-3 border-t border-slate-100 pt-3">
+                <button
+                    type="button"
+                    onClick={handleCerrarSesion}
+                    disabled={cerrando}
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-600 transition hover:bg-red-50 hover:text-red-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] disabled:opacity-50"
+                >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                    {cerrando ? "Cerrando sesión..." : "Cerrar sesión"}
+                </button>
+                <p className="px-3 text-[11px] text-slate-400">Exoma Clínico · TTPS-E</p>
+            </div>        </div>
     );
 
     return (
