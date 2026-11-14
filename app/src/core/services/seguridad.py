@@ -1,6 +1,7 @@
 """Utilidades de hash y emision de JWT."""
 import hashlib
 import re
+import threading
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -94,3 +95,29 @@ def decodificar_token(token: str, secret_key:str) -> dict[str, Any]:
             http_status=401
         )
     return payload
+
+class AlmacenTokensRevocados:
+    # shortcut: registro en memoria de proceso; migrar a Redis/BD si se corre con multiples workers
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._exp_por_jti: dict[str, float] = {}
+    
+    def revocar(self, jti: str, exp_ts: float) -> None:
+        ahora = datetime.now(UTC).timestamp()
+        with self._lock:
+            self._exp_por_jti = {k: v for k, v in self._exp_por_jti.items() if v > ahora}
+            if exp_ts > ahora:
+                self._exp_por_jti[jti] = float(exp_ts)
+    
+    def esta_revocado(self, jti: str) -> bool:
+        ahora = datetime.now(UTC).timestamp()
+        with self._lock:
+            self._exp_por_jti = {k: v for k, v in self._exp_por_jti.items() if v > ahora}
+            return jti in self._exp_por_jti
+    
+    def limpiar(self) -> None:
+        with self._lock:
+            self._exp_por_jti.clear()
+
+
+tokens_revocados = AlmacenTokensRevocados()

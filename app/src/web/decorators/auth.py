@@ -11,6 +11,7 @@ from src.core.services.seguridad import (
     SCOPE_ACCESO_COMPLETO,
     SCOPE_CAMBIO_PASSWORD_INICIAL,
     decodificar_token,
+    tokens_revocados,
 )
 
 
@@ -36,6 +37,13 @@ def requiere_sesion(
                 )
 
             payload = decodificar_token(partes[1].strip(), str(current_app.config["SECRET_KEY"]))
+            jti = str(payload.get("jti", ""))
+            if not jti or tokens_revocados.esta_revocado(jti):
+                raise ErrorDominio(
+                    "Su sesion ha finalizado. Por favor, vuelva a iniciar sesion.",
+                    codigo="SESION_CERRADA_O_INVALIDA",
+                    http_status=401,
+                )
             scope = str(payload.get("scope", ""))
             if scope not in scopes_permitidos:
                 if scope == SCOPE_CAMBIO_PASSWORD_INICIAL:
@@ -83,3 +91,13 @@ def requiere_sesion(
         return wrapper
 
     return decorador
+
+def extraer_payload_opcional() -> dict[str, Any] | None:
+    auth = request.headers.get("Authorization", "").strip()
+    partes = auth.split(None, 1)
+    if len(partes) != 2 or partes[0].lower() != "bearer" or not partes[1].strip():
+        return None
+    try:
+        return decodificar_token(partes[1].strip(), str(current_app.config["SECRET_KEY"]))
+    except ErrorDominio:
+        return None

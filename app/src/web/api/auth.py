@@ -2,7 +2,7 @@
 from flask import Blueprint, g, jsonify, request
 from src.core.services import auth_service
 from src.core.services.seguridad import SCOPE_CAMBIO_PASSWORD_INICIAL
-from src.web.decorators.auth import requiere_sesion
+from src.web.decorators.auth import extraer_payload_opcional, requiere_sesion
 from src.web.validators.auth_validator import (
     CambiarPasswordInicialSchema,
     LoginSchema,
@@ -55,3 +55,9 @@ def me():
         ),
         200
     )
+
+@auth_bp.post("/logout")
+def logout():
+    payload = extraer_payload_opcional()
+    resultado = auth_service.cerrar_sesion(payload)
+    return jsonify({"ok": True, **resultado}), 200

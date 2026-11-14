@@ -23,6 +23,7 @@ from src.core.services.seguridad import (
     emitir_token,
     hashear_password,
     sha256_hex,
+    tokens_revocados,
     validar_politica_password,
     verificar_password,
 )
@@ -253,4 +254,14 @@ def cambiar_password_inicial(
         "access_token": token,
         "ruta_inicio": RUTA_INICIO_POR_ROL[usuario.rol],
         "usuario": _serializar_usuario(usuario),
+    }
+
+def cerrar_sesion(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if payload and payload.get("jti") and payload.get("exp"):
+        tokens_revocados.revocar(str(payload["jti"]), float(payload["exp"]))
+        logger.info("[auth_service] sesion cerrada usuario_id=%s", payload.get("sub"))
+    return {
+        "sesion_finalizada": True,
+        "mensaje": "La sesion se ha cerrado correctamente.",
+        "redirect_to": "/login",
     }
