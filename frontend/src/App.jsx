@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { guardarSesion, leerSesion, limpiarSesion, logoutRequest } from "./api/auth";
 import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
+import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -71,12 +72,7 @@ export default function App() {
         />
         <Route
           path="/verificar-dispositivo"
-          element={
-            <FlujoPendiente
-              titulo="Verificación de máquina nueva"
-              descripcion="Enviamos un código de 6 dígitos a tu correo. Acá va la pantalla del Escenario 26."
-            />
-          }
+          element={<VerificarDispositivoPage sesion={sesion} onSesion={manejarSesion} />}
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
