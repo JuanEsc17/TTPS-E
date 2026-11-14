@@ -21,7 +21,9 @@ from src.core.services.seguridad import (
     SCOPE_CAMBIO_PASSWORD_INICIAL,
     SCOPE_VERIFICAR_DISPOSITIVO,
     emitir_token,
+    hashear_password,
     sha256_hex,
+    validar_politica_password,
     verificar_password,
 )
 
@@ -173,6 +175,81 @@ def iniciar_sesion(
         "estado_login": "AUTENTICADO",
         "requiere_cambio_password": False,
         "requiere_verificacion_dispositivo": False,
+        "access_token": token,
+        "ruta_inicio": RUTA_INICIO_POR_ROL[usuario.rol],
+        "usuario": _serializar_usuario(usuario),
+    }
+
+def cambiar_password_inicial(
+    *,
+    usuario_id: int,
+    password_inicial: str,
+    nueva_password: str,
+    confirmacion_password: str,
+    dispositivo_identificador: str,
+) -> dict[str, Any]:
+    if nueva_password != confirmacion_password:
+        raise ErrorDominio(
+            "La confirmacion no coincide con la nueva contrasena.",
+            codigo="NUEVA_PASSWORD_INVALIDA",
+            http_status=400,
+        )
+    
+    validar_politica_password(nueva_password, codigo="NUEVA_PASSWORD_INVALIDA")
+    if nueva_password == password_inicial:
+        raise ErrorDominio(
+            "La nueva contrasena no puede ser igual a la contrasena inicial.",
+            codigo="PASSWORD_IGUAL_A_INICIAL",
+            http_status=400
+        )
+    
+    usuario = usuario_repo.buscar_por_id(usuario_id, for_update=True)
+    if usuario is None:
+        raise ErrorDominio(
+            "Usuario inexistente.",
+            codigo="TOKEN_INVALIDO_O_EXPIRADO",
+            http_status=401,
+        )
+    if not usuario.debe_cambiar_password:
+        raise ErrorDominio(
+            "La contrasena inicial ya fue cambiada previamente.",
+            codigo="PASSWORD_INICIAL_YA_CAMBIADA",
+            http_status=409
+        )
+    if not verificar_password(usuario.password_hash, password_inicial):
+        raise ErrorDominio(
+            "La contrasena inicial es incorrecta.",
+            codigo="PASSWORD_INICIAL_INCORRECTA",
+            http_status=401
+        )
+    if verificar_password(usuario.password_hash, nueva_password):
+        raise ErrorDominio(
+            "La nueva contrasena no puede ser igual a la contrasena inicial.",
+            codigo="PASSWORD_IGUAL_A_INICIAL",
+            http_status=400
+        )
+
+    dispositivo_hash = sha256_hex(dispositivo_identificador)
+    usuario.password_hash = hashear_password(nueva_password)
+    usuario.debe_cambiar_password = False
+    usuario_repo.registrar_dispositivo(usuario.id, dispositivo_hash)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+    logger.info("[auth_service] password inicial cambiada usuario_id=%s", usuario.id)
+    token = emitir_token(
+        str(current_app.config["SECRET_KEY"]),
+        usuario_id=usuario.id,
+        rol=usuario.rol.value,
+        scope=SCOPE_ACCESO_COMPLETO,
+        ttl_segundos=8 * 3600,
+        dispositivo_hash=dispositivo_hash,
+    )
+    return {
+        "estado_login": "AUTENTICADO",
+        "dispositivo_registrado": True,
         "access_token": token,
         "ruta_inicio": RUTA_INICIO_POR_ROL[usuario.rol],
         "usuario": _serializar_usuario(usuario),

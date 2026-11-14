@@ -19,3 +19,18 @@ class LoginSchema(Schema):
             if isinstance(limpio.get(campo), str):
                 limpio[campo] = limpio[campo].strip()
         return limpio
+    
+class CambiarPasswordInicialSchema(Schema):
+    password_inicial = fields.Str(required=True, validate=validate.Length(min=1))
+    nueva_password = fields.Str(required=True, validate=validate.Length(min=1))
+    confirmacion_password = fields.Str(required=True, validate=validate.Length(min=1))
+    dispositivo_identificador = fields.Str(
+        required=True,
+        validate=validate.Regexp(r"\S", error="No puede estar vacio.")
+    )
+
+    @pre_load
+    def normalizar_dispositivo(self, data:dict, **kwargs:object) -> dict:
+        if isinstance(data, dict) and isinstance(data.get("dispositivo_identificador"), str):
+            return {**data, "dispositivo_identificador": data["dispositivo_identificador"].strip()}
+        return data
