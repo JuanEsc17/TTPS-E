@@ -72,3 +72,21 @@ def reservar_turno(estudio_id: int) -> tuple[Any, int]:
         return jsonify({"ok": False, "error": error}), status
 
     return jsonify({"ok": True, "data": resultado}), status
+
+
+@turnos_bp.post("/turnos/<int:turno_id>/cancelar")
+@requiere_sesion(roles=[Rol.PACIENTE])
+def cancelar_turno(turno_id: int) -> tuple[Any, int]:
+    """Cancela un turno de extraccion activo perteneciente al paciente autenticado."""
+    usuario_actual_id = g.usuario_actual.id
+
+    resultado, error, status = TurnoService.cancelar_turno(
+        turno_id=turno_id,
+        usuario_actual_id=usuario_actual_id,
+    )
+
+    if error:
+        return jsonify({"ok": False, "error": error}), status
+
+    return jsonify({"ok": True, "data": resultado}), status
+

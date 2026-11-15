@@ -7,7 +7,8 @@ from typing import Any
 from flask import current_app, has_app_context
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from src.clients import ClienteError, EmailClient
-from src.core.models.enums import CanalAviso, EstadoEstudio
+from src.core.models.enums import CanalAviso, EstadoEstudio, ResultadoAutorizacion
+from src.core.models.estudios import Estudio
 from src.core.models.reglas import MAX_AUSENCIAS
 from src.core.models.turnos import CentroExtraccion
 from src.core.repos.turno_repo import TurnoRepo
@@ -281,3 +282,72 @@ class TurnoService:
             },
         }
         return resultado, None, 201
+
+    @staticmethod
+    def _determinar_estado_retorno_estudio(estudio: Estudio) -> EstadoEstudio:
+        """Calcula el estado al que vuelve el estudio tras cancelar un turno activo."""
+        if any(m.motivo_descarte is not None for m in estudio.muestras) and estudio.muestra_vigente is None:
+            return EstadoEstudio.REMUESTREO_REQUERIDO
+        if any(a.resultado == ResultadoAutorizacion.AUTORIZADA for a in estudio.autorizaciones):
+            return EstadoEstudio.AUTORIZADO
+        return EstadoEstudio.CREADO
+
+    @classmethod
+    def cancelar_turno(
+        cls,
+        turno_id: int,
+        usuario_actual_id: int,
+    ) -> tuple[dict[str, Any] | None, str | None, int]:
+        """Cancela un turno activo por solicitud exclusiva del paciente titular."""
+        turno = TurnoRepo.obtener_turno_por_id(turno_id, bloquear=True)
+        if not turno:
+            return None, f"El turno con ID {turno_id} no existe.", 404
+
+        if not turno.paciente or turno.paciente.usuario_id != usuario_actual_id:
+            return (
+                None,
+                "Solo el paciente titular puede cancelar su turno de extraccion.",
+                403,
+            )
+
+        estudio = turno.estudio
+        if (
+            not turno.activo
+            or turno.asistio is not None
+            or estudio.estado != EstadoEstudio.TURNO_SACADO
+            or TurnoRepo.existe_muestra_por_turno(turno.id)
+        ):
+            return (
+                None,
+                "El turno ya fue cancelado o ya fue procesado y no puede cancelarse.",
+                409,
+            )
+
+        try:
+            TurnoRepo.cancelar_turno(turno)
+            estudio.estado = cls._determinar_estado_retorno_estudio(estudio)
+            TurnoRepo.crear_aviso(
+                usuario_id=turno.paciente.usuario_id,
+                mensaje=(
+                    f"Su turno del {turno.inicio.strftime('%d/%m/%Y %H:%M')} fue cancelado. "
+                    "Ya puede solicitar un nuevo turno de extraccion."
+                ),
+                canal=CanalAviso.APP,
+                enviado=True,
+            )
+            TurnoRepo.guardar_cambios()
+        except SQLAlchemyError as exc:
+            TurnoRepo.deshacer_cambios()
+            return None, f"Error inesperado al cancelar el turno: {exc!s}", 500
+
+        resultado = {
+            "turno_id": turno.id,
+            "estudio_id": estudio.id,
+            "centro_id": turno.centro_id,
+            "inicio": turno.inicio.isoformat(),
+            "activo": turno.activo,
+            "estado_estudio": estudio.estado.value,
+            "ausencias": estudio.ausencias,
+            "puede_sacar_nuevo_turno": True,
+        }
+        return resultado, None, 200
