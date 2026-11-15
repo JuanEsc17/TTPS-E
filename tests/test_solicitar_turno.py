@@ -22,6 +22,7 @@ from src.core.models import (
     Turno,
     Usuario,
 )
+from src.core.services.seguridad import SCOPE_ACCESO_COMPLETO, emitir_token
 
 
 @pytest.fixture
@@ -100,6 +101,7 @@ def datos_escenario(session):
         "centro": centro,
         "patologia": patologia,
         "medico": medico,
+        "usuario_medico": u_med,
         "usuario_paciente": u_pac,
         "usuario_otro": u_otro,
         "paciente": paciente,
@@ -116,13 +118,25 @@ def proximo_dia_habil(hora: int = 10, minuto: int = 15) -> datetime:
     return candidato.replace(hour=hora, minute=minuto, second=0, microsecond=0)
 
 
+def auth_header_para(app, usuario: Usuario) -> dict[str, str]:
+    """Genera cabecera Authorization con un Bearer token valido para el usuario."""
+    token = emitir_token(
+        str(app.config["SECRET_KEY"]),
+        usuario_id=usuario.id,
+        rol=usuario.rol.value,
+        scope=SCOPE_ACCESO_COMPLETO,
+        ttl_segundos=3600,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
 # ==============================================================================
 # 1. FLUJO COMPLETO END-TO-END (Centros -> Disponibilidad -> Solicitar Turno)
 # ==============================================================================
 def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_escenario):
     """
     Recorre el flujo completo del Escenario 7 (TC-01):
-    1. Listar centros de extraccion.
+    1. Listar centros de extraccion (requiere sesion autenticada).
     2. Consultar horarios disponibles para una fecha habil.
     3. Solicitar un turno en un estudio AUTORIZADO verificando EmailClient y BD.
     4. Confirmar que el horario reservado ya no figura como disponible.
@@ -133,11 +147,13 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
 
     estudio = datos_escenario["estudio"]
     usuario_paciente = datos_escenario["usuario_paciente"]
+    headers_pac = auth_header_para(app, usuario_paciente)
+
     horario = proximo_dia_habil(10, 15)
     fecha_str = horario.strftime("%Y-%m-%d")
 
     # Paso 1: Listar centros de extraccion
-    res_centros = client.get("/api/v1/centros-extraccion")
+    res_centros = client.get("/api/v1/centros-extraccion", headers=headers_pac)
     assert res_centros.status_code == 200
     centros_data = res_centros.get_json()["data"]
     assert len(centros_data) == 1
@@ -146,7 +162,8 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
 
     # Paso 2: Consultar disponibilidad (36 slots de 15 min entre 09:00 y 17:45)
     res_disp = client.get(
-        f"/api/v1/centros-extraccion/{centro_id}/turnos-disponibles?fecha={fecha_str}"
+        f"/api/v1/centros-extraccion/{centro_id}/turnos-disponibles?fecha={fecha_str}",
+        headers=headers_pac,
     )
     assert res_disp.status_code == 200
     slots_libres = res_disp.get_json()["data"]["slots_libres"]
@@ -157,7 +174,7 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
     res_turno = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro_id, "inicio": horario.isoformat()},
-        headers={"X-User-Id": str(usuario_paciente.id)},
+        headers=headers_pac,
     )
     assert res_turno.status_code == 201
     data_turno = res_turno.get_json()["data"]
@@ -196,7 +213,8 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
 
     # Paso 4: Consultar disponibilidad nuevamente y comprobar que 10:15 ya no esta libre
     res_disp_post = client.get(
-        f"/api/v1/centros-extraccion/{centro_id}/turnos-disponibles?fecha={fecha_str}"
+        f"/api/v1/centros-extraccion/{centro_id}/turnos-disponibles?fecha={fecha_str}",
+        headers=headers_pac,
     )
     assert res_disp_post.status_code == 200
     slots_post = res_disp_post.get_json()["data"]["slots_libres"]
@@ -208,7 +226,7 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
 # 2. ESTADOS HABILITADOS PARA SACAR TURNO (TC-02, TC-03 y reintento tras ausencia)
 # ==============================================================================
 def test_solicitar_turno_estudio_creado_con_pago_particular_activo(
-    client, session, datos_escenario
+    app, client, session, datos_escenario
 ):
     """TC-02: Estudio en CREADO con pago particular vigente (anulado=False) puede sacar turno."""
     estudio = datos_escenario["estudio"]
@@ -233,6 +251,7 @@ def test_solicitar_turno_estudio_creado_con_pago_particular_activo(
     session.add(pago)
     session.commit()
 
+    headers = auth_header_para(app, datos_escenario["usuario_paciente"])
     horario = proximo_dia_habil(11, 0)
     response = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
@@ -240,6 +259,7 @@ def test_solicitar_turno_estudio_creado_con_pago_particular_activo(
             "centro_id": datos_escenario["centro"].id,
             "inicio": f"{horario.strftime('%Y-%m-%dT%H:%M:%S')}Z",
         },
+        headers=headers,
     )
     assert response.status_code == 201
     session.refresh(estudio)
@@ -247,11 +267,12 @@ def test_solicitar_turno_estudio_creado_con_pago_particular_activo(
 
 
 def test_solicitar_turno_remuestreo_y_tras_ausencia_previa(
-    client, session, datos_escenario
+    app, client, session, datos_escenario
 ):
     """TC-03: Permite reservar en REMUESTREO_REQUERIDO y en TURNO_SACADO con ausencias < 5."""
     estudio = datos_escenario["estudio"]
     centro = datos_escenario["centro"]
+    headers = auth_header_para(app, datos_escenario["usuario_paciente"])
 
     # Caso A: Remuestreo requerido (sin costo adicional)
     estudio.estado = EstadoEstudio.REMUESTREO_REQUERIDO
@@ -261,6 +282,7 @@ def test_solicitar_turno_remuestreo_y_tras_ausencia_previa(
     res_1 = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro.id, "inicio": horario_1.isoformat()},
+        headers=headers,
     )
     assert res_1.status_code == 201
 
@@ -276,6 +298,7 @@ def test_solicitar_turno_remuestreo_y_tras_ausencia_previa(
     res_2 = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro.id, "inicio": horario_2.isoformat()},
+        headers=headers,
     )
     assert res_2.status_code == 201
     assert res_2.get_json()["data"]["ausencias_acumuladas"] == 1
@@ -285,9 +308,9 @@ def test_solicitar_turno_remuestreo_y_tras_ausencia_previa(
 # 3. REGLAS DE RECHAZO DE NEGOCIO Y COLISIONES (TC-04, TC-06)
 # ==============================================================================
 def test_solicitar_turno_colision_mismo_horario_retorna_409(
-    client, session, datos_escenario
+    app, client, session, datos_escenario
 ):
-    """TC-04: Dos estudios que intentan reservar el mismo centro y horario reciben 409."""
+    """TC-04: Dos pacientes con estudios autorizados intentan reservar el mismo slot -> 409."""
     centro = datos_escenario["centro"]
     estudio_1 = datos_escenario["estudio"]
 
@@ -300,12 +323,15 @@ def test_solicitar_turno_colision_mismo_horario_retorna_409(
     session.add(estudio_2)
     session.commit()
 
+    headers_1 = auth_header_para(app, datos_escenario["usuario_paciente"])
+    headers_2 = auth_header_para(app, datos_escenario["usuario_otro"])
     horario = proximo_dia_habil(9, 15)
 
     # Primer paciente reserva con exito
     res_1 = client.post(
         f"/api/v1/estudios/{estudio_1.id}/turnos",
         json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_1,
     )
     assert res_1.status_code == 201
 
@@ -313,6 +339,7 @@ def test_solicitar_turno_colision_mismo_horario_retorna_409(
     res_2 = client.post(
         f"/api/v1/estudios/{estudio_2.id}/turnos",
         json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_2,
     )
     assert res_2.status_code == 409
     assert "horario" in res_2.get_json()["error"].lower()
@@ -327,7 +354,7 @@ def test_solicitar_turno_colision_mismo_horario_retorna_409(
     ],
 )
 def test_solicitar_turno_estudio_no_habilitado_retorna_409(
-    client, session, datos_escenario, estado, ausencias, con_pago_anulado
+    app, client, session, datos_escenario, estado, ausencias, con_pago_anulado
 ):
     """TC-06: Estudios impagos, con pago anulado o con 5 ausencias retornan 409."""
     estudio = datos_escenario["estudio"]
@@ -354,21 +381,24 @@ def test_solicitar_turno_estudio_no_habilitado_retorna_409(
         )
     session.commit()
 
+    headers = auth_header_para(app, datos_escenario["usuario_paciente"])
     horario = proximo_dia_habil(10, 0)
     response = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": datos_escenario["centro"].id, "inicio": horario.isoformat()},
+        headers=headers,
     )
     assert response.status_code == 409
     assert "no se encuentra habilitado" in response.get_json()["error"].lower()
 
 
 def test_solicitar_turno_ya_posee_turno_activo_retorna_409(
-    client, datos_escenario
+    app, client, datos_escenario
 ):
     """Un estudio que ya tiene un turno activo pendiente no puede reservar un segundo turno."""
     estudio = datos_escenario["estudio"]
     centro = datos_escenario["centro"]
+    headers = auth_header_para(app, datos_escenario["usuario_paciente"])
 
     h1 = proximo_dia_habil(10, 0)
     h2 = proximo_dia_habil(11, 0)
@@ -376,12 +406,14 @@ def test_solicitar_turno_ya_posee_turno_activo_retorna_409(
     res_1 = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro.id, "inicio": h1.isoformat()},
+        headers=headers,
     )
     assert res_1.status_code == 201
 
     res_2 = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro.id, "inicio": h2.isoformat()},
+        headers=headers,
     )
     assert res_2.status_code == 409
     assert "ya posee un turno activo" in res_2.get_json()["error"].lower()
@@ -391,11 +423,12 @@ def test_solicitar_turno_ya_posee_turno_activo_retorna_409(
 # 4. VALIDACIONES DE HORARIO Y ENTRADA (TC-05 -> 422)
 # ==============================================================================
 def test_validaciones_horarias_y_formato_retornan_422(
-    client, datos_escenario
+    app, client, datos_escenario
 ):
     """TC-05: Rechaza horarios en el pasado, fin de semana, feriado, fuera de rango o no multiplos de 15."""
     estudio = datos_escenario["estudio"]
     centro = datos_escenario["centro"]
+    headers = auth_header_para(app, datos_escenario["usuario_paciente"])
     base = proximo_dia_habil()
 
     # Proximo sabado
@@ -419,33 +452,61 @@ def test_validaciones_horarias_y_formato_retornan_422(
         res = client.post(
             f"/api/v1/estudios/{estudio.id}/turnos",
             json={"centro_id": centro.id, "inicio": inicio_invalido},
+            headers=headers,
         )
         assert res.status_code == 422
 
     # Disponibilidad en fin de semana o feriado devuelve lista vacia
     res_disp_sab = client.get(
-        f"/api/v1/centros-extraccion/{centro.id}/turnos-disponibles?fecha={sabado.strftime('%Y-%m-%d')}"
+        f"/api/v1/centros-extraccion/{centro.id}/turnos-disponibles?fecha={sabado.strftime('%Y-%m-%d')}",
+        headers=headers,
     )
     assert res_disp_sab.status_code == 200
     assert res_disp_sab.get_json()["data"]["slots_libres"] == []
 
 
 # ==============================================================================
-# 5. PERMISOS (403), RECURSOS INEXISTENTES (404) Y FALLO DE EMAIL (502)
+# 5. SEGURIDAD: AUTENTICACION (401), ROLES (403), PERMISOS (403) Y 404/502
 # ==============================================================================
+def test_autenticacion_y_roles_en_endpoints_turnos(
+    app, client, session, datos_escenario
+):
+    """Verifica que los endpoints exijan autenticacion (401) y rol Paciente en la reserva (403)."""
+    estudio = datos_escenario["estudio"]
+    centro = datos_escenario["centro"]
+    horario = proximo_dia_habil(10, 0)
+
+    # 1. Peticiones sin token retornan 401 NO_AUTENTICADO
+    assert client.get("/api/v1/centros-extraccion").status_code == 401
+    assert client.get(f"/api/v1/centros-extraccion/{centro.id}/turnos-disponibles?fecha=2026-11-20").status_code == 401
+    assert client.post(f"/api/v1/estudios/{estudio.id}/turnos", json={"centro_id": centro.id, "inicio": horario.isoformat()}).status_code == 401
+
+    # 2. Usuario con rol MEDICO intentando reservar turno -> 403 ROL_NO_AUTORIZADO
+    headers_medico = auth_header_para(app, datos_escenario["usuario_medico"])
+    res_medico = client.post(
+        f"/api/v1/estudios/{estudio.id}/turnos",
+        json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_medico,
+    )
+    assert res_medico.status_code == 403
+    assert res_medico.get_json()["code"] == "ROL_NO_AUTORIZADO"
+
+
 def test_permisos_recursos_inexistentes_y_rollback_email(
     app, client, session, datos_escenario
 ):
-    """Verifica 403 por usuario no titular, 404 por estudio/centro inexistente y 502 con rollback si falla email."""
+    """Verifica 403 por paciente no titular, 404 por estudio/centro inexistente y 502 con rollback si falla email."""
     estudio = datos_escenario["estudio"]
     centro = datos_escenario["centro"]
+    headers_pac = auth_header_para(app, datos_escenario["usuario_paciente"])
+    headers_otro_pac = auth_header_para(app, datos_escenario["usuario_otro"])
     horario = proximo_dia_habil(15, 0)
 
-    # 1. Usuario ajeno al estudio -> 403 Forbidden
+    # 1. Paciente ajeno al estudio -> 403 Forbidden (no tiene permisos sobre el estudio)
     res_403 = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro.id, "inicio": horario.isoformat()},
-        headers={"X-User-Id": str(datos_escenario["usuario_otro"].id)},
+        headers=headers_otro_pac,
     )
     assert res_403.status_code == 403
 
@@ -453,12 +514,14 @@ def test_permisos_recursos_inexistentes_y_rollback_email(
     res_404_est = client.post(
         "/api/v1/estudios/99999/turnos",
         json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_pac,
     )
     assert res_404_est.status_code == 404
 
     res_404_cen = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": 99999, "inicio": horario.isoformat()},
+        headers=headers_pac,
     )
     assert res_404_cen.status_code == 404
 
@@ -471,6 +534,7 @@ def test_permisos_recursos_inexistentes_y_rollback_email(
     res_502 = client.post(
         f"/api/v1/estudios/{estudio.id}/turnos",
         json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_pac,
     )
     assert res_502.status_code == 502
 
