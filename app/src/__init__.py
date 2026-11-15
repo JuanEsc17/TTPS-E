@@ -65,4 +65,16 @@ def create_app(config: dict | None = None) -> Flask:
 
     app.register_blueprint(turnos_bp)
 
+    @app.cli.command("procesar-ausencias")
+    def procesar_ausencias_cli() -> None:
+        """Procesa automaticamente turnos vencidos (> 15 min) sin muestra y notifica por mail."""
+        from .core.services.turno_service import TurnoService
+
+        resumen = TurnoService.procesar_turnos_vencidos()
+        print(
+            f"Turnos vencidos detectados: {resumen['total_detectados']} | "
+            f"Procesados: {resumen['total_procesados']} | "
+            f"Errores: {len(resumen['errores'])}"
+        )
+
     return app

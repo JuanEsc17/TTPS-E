@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import contains_eager, joinedload, selectinload
 from src.core.database import db
 from src.core.models.economia import Presupuesto
+from src.core.models.enums import EstadoEstudio
 from src.core.models.estudios import Estudio
 from src.core.models.logistica import Muestra
 from src.core.models.perfiles import Paciente
@@ -132,6 +133,49 @@ class TurnoRepo:
         turno.activo = False
         db.session.flush()
         return turno
+
+    @staticmethod
+    def registrar_ausencia_turno(turno: Turno) -> Turno:
+        """Marca un turno como ausente (asistio=False, activo=False) liberando el slot."""
+        turno.asistio = False
+        turno.activo = False
+        db.session.flush()
+        return turno
+
+    @staticmethod
+    def anular_pago_activo(estudio: Estudio) -> int | None:
+        """Anula los pagos vigentes del presupuesto del estudio y retorna el primer ID anulado."""
+        if not estudio.presupuesto:
+            return None
+
+        pago_anulado_id: int | None = None
+        for pago in estudio.presupuesto.pagos:
+            if not pago.anulado:
+                pago.anulado = True
+                if pago_anulado_id is None:
+                    pago_anulado_id = pago.id
+
+        if pago_anulado_id is not None:
+            db.session.flush()
+        return pago_anulado_id
+
+    @staticmethod
+    def listar_ids_turnos_vencidos_sin_procesar(fecha_limite_inicio: datetime) -> list[int]:
+        """Retorna IDs de turnos activos vencidos sin muestra ni asistencia registrada."""
+        muestra_existente = select(Muestra.id).where(Muestra.turno_id == Turno.id).exists()
+        stmt = (
+            select(Turno.id)
+            .join(Turno.estudio)
+            .where(
+                Turno.activo.is_(True),
+                Turno.asistio.is_(None),
+                Turno.inicio <= fecha_limite_inicio,
+                Estudio.estado == EstadoEstudio.TURNO_SACADO,
+                ~muestra_existente,
+            )
+            .order_by(Turno.inicio.asc(), Turno.id.asc())
+        )
+        return list(db.session.execute(stmt).scalars().all())
 
     @staticmethod
     def crear_aviso(
