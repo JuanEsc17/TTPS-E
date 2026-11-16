@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom"
+import { Navigate, Link, useNavigate } from "react-router-dom"
 import { loginRequest } from "../api/auth"
 import LogoAdn from "../components/LogoAdn";
 
@@ -140,6 +140,12 @@ export default function LoginPage({ sesion, onSesion }) {
                                     {cargando ? "Validando..." : "Continuar →"}
                                 </button>
                             </div>
+                            <p className="border-t border-slate-100 pt-4 text-xs text-slate-600">
+                                ¿Sos médico y todavía no tenés cuenta?{" "}
+                                <Link to="/registro-medico" className="font-semibold text-[#0B4F8A] hover:underline">
+                                    Registrarse como médico
+                                </Link>
+                            </p>
                         </form>
                     </section>
                     <aside

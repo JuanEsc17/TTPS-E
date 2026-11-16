@@ -11,6 +11,7 @@ from .web.api.turnos import turnos_bp
 load_dotenv()
 
 from .web.api.auth import auth_bp
+from .web.api.medicos import medicos_bp
 from .web.handlers.errors import registrar_manejadores_errores
 
 
@@ -60,6 +61,7 @@ def create_app(config: dict | None = None) -> Flask:
     db.init_app(app)
     registrar_manejadores_errores(app)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(medicos_bp)
 
     # Registrar blueprints
 
