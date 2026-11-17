@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 12 – Formar un sample-set de muestras
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 2.0
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-12-Formar-un-sample-set-de-muestras`
 
@@ -10,29 +10,29 @@
 | Categoría | Símbolo LEL | Modelo / Tabla en `app/src/core/models/` |
 |---|---|---|
 | **Sujeto** | `Administrativo` | `Usuario` (`Rol.ADMINISTRATIVO`) en `usuarios` (receptor de aviso cuando el lote se cierra) |
-| **Objeto** | `Muestra` | `Muestra` en `muestras` (`ML_MINIMOS_TUBO = Decimal("2")`) |
+| **Objeto** | `Muestra` | `Muestra` en `muestras` *(sin restricción de volumen mínimo `< 2 ml` según ADR-004)* |
 | **Objeto** | `Sample set` | `SampleSet` en `sample_sets` (`EstadoSampleSet`, `MUESTRAS_POR_SAMPLE_SET = 10`) |
 | **Objeto** | `Estudio` | `Estudio` en `estudios` |
 | **Objeto** | `Pompe urgente` | `Estudio.es_pompe_urgente` / `SampleSet.es_pompe_urgente` |
 | **Objeto** | `CSV` | `SampleSet.csv_path` (disparado al cerrar el `Sample set`) |
 | **Objeto** | `Autorización del Ministerio` | `SampleSet.autorizacion_ministerio_pdf_path` |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` *(auditoría obligatoria de `sample_set` y `estudio`)* |
 | **Verbo** | `Armar sample set` | Servicio `armar_sample_set` (`LogisticaService`) |
-| **Verbo** | `Remuestrear` | Desvío automático al Escenario 10 si `muestra.mililitros < 2` |
+| **Verbo** | `Registrar modificación` | Servicio `AuditoriaService.registrar_modificacion(...)` |
 | **Estado** | `En laboratorio central` | `EstadoEstudio.EN_LAB_CENTRAL` (`"En laboratorio central"`) |
 | **Estado** | `En espera de retiro` | `EstadoEstudio.EN_ESPERA_RETIRO` (`"En espera de retiro"`) |
-| **Estado** | `Remuestreo requerido` | `EstadoEstudio.REMUESTREO_REQUERIDO` (`"Remuestreo requerido"`) |
 
 ---
 
 ## Overview
 
-- **Objetivo**: Agrupar automáticamente las `Muestra`s recibidas en el laboratorio central en conjuntos de diez (`MUESTRAS_POR_SAMPLE_SET = 10`) dentro de un `Sample set` para su envío sin multa a Corea.
-- **Contexto**: Las `Muestra`s llegaron al laboratorio central entregadas por el `Transportista` (Escenario 11) y sus `Estudio`s están en estado `En laboratorio central`. El sistema debe agruparlas automáticamente en lotes de hasta 10 muestras y mantener el `Sample set` sellado e inmutable una vez cerrado y pasado al siguiente estado (`En espera de retiro`).
-- **Recursos**: `Muestra` (`muestras`), `Sample set` (`sample_sets`), `Estudio` (`estudios`).
+- **Objetivo**: Agrupar automáticamente las `Muestra`s recibidas en el laboratorio central en conjuntos de diez (`MUESTRAS_POR_SAMPLE_SET = 10`) dentro de un `Sample set` para su envío sin multa a Corea, registrando cada creación y modificación en `registro_modificaciones`.
+- **Contexto**: Las `Muestra`s llegaron al laboratorio central entregadas por el `Transportista` (Escenario 11) y sus `Estudio`s están en estado `En laboratorio central`. Tras la eliminación de la regla `< 2 ml` (Requerimiento 5 / ADR-004), toda muestra vigente llegada sin `motivo_descarte` integra el lote sin rechazo volumétrico; el sistema las agrupa en lotes de hasta 10 y mantiene el `Sample set` sellado e inmutable una vez cerrado y pasado a `En espera de retiro`.
+- **Recursos**: `Muestra` (`muestras`), `Sample set` (`sample_sets`), `Estudio` (`estudios`), `Registro de modificaciones` (`registro_modificaciones`).
 - **Episodios**:
-  1. El sistema recibe las `Muestra`s en el laboratorio central y verifica que sean aptas (`mililitros >= 2`).
+  1. El sistema recibe las `Muestra`s en el laboratorio central y verifica que estén vigentes (`motivo_descarte IS NULL` y sin asignación previa a otro `Sample set`).
   2. El sistema agrupa las `Muestra`s en conjuntos de hasta diez (`MUESTRAS_POR_SAMPLE_SET = 10`).
-  3. El sistema crea o actualiza el `Sample set` correspondiente y, al llegar a 10 muestras (o ante un `Pompe urgente`), lo cierra y pasa sus `Estudio`s a `En espera de retiro`.
+  3. El sistema crea o actualiza el `Sample set` correspondiente, registra la trazabilidad en `registro_modificaciones` y, al llegar a 10 muestras (o ante un `Pompe urgente`), lo cierra pasando sus `Estudio`s a `En espera de retiro`.
   4. El sistema mantiene el `Sample set` sin modificar una vez iniciado el siguiente estado (`EstadoSampleSet.CERRADO` / `EstadoEstudio.EN_ESPERA_RETIRO`).
 
 ---
@@ -43,9 +43,9 @@
 |---|---|
 | Sistema (`LogisticaService`) | Actor principal: ejecuta de forma 100% automática la agrupación de `Muestra`s en `SampleSet` al registrarse su llegada al laboratorio central. |
 | `Administrativo` | Visualiza el `Sample set` en formación o cerrado (`En espera de retiro`) y recibe un `Aviso` cuando un `Sample set` se cierra. |
-| Capa `router` (`Flask Blueprint`) | Expone los endpoints de consulta de `SampleSet` (`GET /api/sample-sets`, `GET /api/sample-sets/{id}`) y el registro de mililitros al recepcionar muestras. |
-| Capa `service` (`LogisticaService`) | Aplica las reglas `MUESTRAS_POR_SAMPLE_SET = 10` y `ML_MINIMOS_TUBO = Decimal("2")`, gestiona el cierre del lote y garantiza su inmutabilidad posterior. |
-| Capa `repo` (`SampleSetRepo`, `MuestraRepo`, `EstudioRepo`, `AvisoRepo`) | Ejecuta operaciones atómicas con bloqueo `SELECT ... FOR UPDATE` sobre `sample_sets`, `muestras` y `estudios` en `PostgreSQL`. |
+| Capa `router` (`Flask Blueprint`) | Expone los endpoints de consulta de `SampleSet` (`GET /api/sample-sets`, `GET /api/sample-sets/{id}`) y confirmación de recepción en laboratorio central. |
+| Capa `service` (`LogisticaService`, `AuditoriaService`) | Aplica `MUESTRAS_POR_SAMPLE_SET = 10` (sin regla de `2 ml`), gestiona el cierre del lote, garantiza inmutabilidad posterior y asienta toda mutación en `registro_modificaciones`. |
+| Capa `repo` (`SampleSetRepo`, `MuestraRepo`, `EstudioRepo`, `AuditoriaRepo`, `AvisoRepo`) | Ejecuta operaciones atómicas con bloqueo `SELECT ... FOR UPDATE` sobre `sample_sets`, `muestras`, `estudios` y `registro_modificaciones` en `PostgreSQL`. |
 
 ---
 
@@ -59,32 +59,29 @@
 
 ## Trigger
 
-Evento interno disparado automáticamente al finalizar el **STEP 3 del Escenario 11** (`marcar_llegada_lab_central`), o al confirmarse la medición de mililitros de una `Muestra` en el laboratorio central (`POST /api/logistica/muestras/{muestra_id}/recepcion-lab-central`).
+Evento interno disparado automáticamente al finalizar el **STEP 3 del Escenario 11** (`marcar_llegada_lab_central`), o al confirmarse la recepción de una `Muestra` en el laboratorio central (`POST /api/logistica/muestras/{muestra_id}/recepcion-lab-central`).
 
 ---
 
 ## Workflow Tree
 
-### STEP 1: Validación de aptitud física y volumen de cada Muestra recibida
+### STEP 1: Validación de elegibilidad de cada Muestra recibida (sin control de `< 2 ml`)
 **Actor**: `service` (`LogisticaService.procesar_ingreso_muestra_lab_central`) -> `repo` (`MuestraRepo`, `EstudioRepo`)
 **Action**: Para cada `Muestra` recién ingresada al laboratorio central:
 1. Verifica que `estudio.estado == EstadoEstudio.EN_LAB_CENTRAL`, que `muestra.motivo_descarte IS NULL` y que `muestra.sample_set_id IS NULL`.
-2. Si `muestra.mililitros` está informado y es `< ML_MINIMOS_TUBO` (`Decimal("2")`), la muestra **no se incluye** en ningún `SampleSet`: se invoca automáticamente el flujo del **Escenario 10** (`Remuestrear un estudio`) con `MotivoDescarte.VOLUMEN_INSUFICIENTE`, pasando el `Estudio` a `EstadoEstudio.REMUESTREO_REQUERIDO`.
-3. Si `muestra.mililitros is None` o `muestra.mililitros >= Decimal("2")`, la muestra es apta para integrar un `SampleSet`.
+2. La muestra **no se evalúa por volumen en mililitros** (se elimina definitivamente el rechazo por `< 2 ml` / `VOLUMEN_INSUFICIENTE`, ADR-004). Toda muestra vigente sin descarte técnico previo es apta para integrar un `SampleSet`.
 **Timeout**: 3s
-**Input**: `{ muestra_id: 149, estudio_id: 42, mililitros: "4.50" }`
-**Output on SUCCESS**:
-  - Si `mililitros >= 2.00`: Muestra apta -> GO TO STEP 2.
-  - Si `mililitros < 2.00`: Muestra descartada -> Desvío a Escenario 10 (`EstadoEstudio.REMUESTREO_REQUERIDO`), fin del flujo para esta muestra.
+**Input**: `{ muestra_id: 149, estudio_id: 42 }`
+**Output on SUCCESS**: Muestra apta -> GO TO STEP 2.
 **Output on FAILURE**:
   - `FAILURE(invalid_state)`: `estudio.estado != EstadoEstudio.EN_LAB_CENTRAL` o la muestra ya tiene `motivo_descarte IS NOT NULL` -> retornar error `409 Conflict` (`code: "MUESTRA_NO_APTA_PARA_SAMPLE_SET"`).
   - `FAILURE(conflict)`: `muestra.sample_set_id IS NOT NULL` (la muestra ya fue agrupada en un `SampleSet` por otra ejecución concurrente) -> operación idempotente: retornar el `sample_set_id` actual sin duplicar asignación.
 
 **Observable states during this step**:
-  - Customer/Actor (`Paciente`) sees: `Estudio` en `En laboratorio central` (o `Remuestreo requerido` si `< 2 ml`).
+  - Customer/Actor (`Paciente`) sees: `Estudio` en `En laboratorio central`.
   - Operator (`Administrativo`) sees: `Muestra` validada en recepción del laboratorio central.
-  - Database: `muestras.mililitros = 4.50`, `muestras.llegada_lab_central IS NOT NULL`.
-  - Logs: `[logistica_service] muestra_validada_para_sample_set muestra_id=149 estudio_id=42 ml=4.50`
+  - Database: `muestras.llegada_lab_central IS NOT NULL`, `muestras.motivo_descarte IS NULL`.
+  - Logs: `[logistica_service] muestra_validada_para_sample_set muestra_id=149 estudio_id=42`
 
 ---
 
@@ -93,7 +90,7 @@ Evento interno disparado automáticamente al finalizar el **STEP 3 del Escenario
 **Action**:
 1. Busca en la tabla `sample_sets` el registro con `estado == EstadoSampleSet.ABIERTO` aplicando bloqueo de fila `SELECT ... FOR UPDATE` para serializar llegadas simultáneas de múltiples transportistas.
 2. Verifica que la cantidad de muestras válidas (`motivo_descarte IS NULL`) actualmente asociadas a ese `SampleSet` sea `< MUESTRAS_POR_SAMPLE_SET` (`10`).
-3. Si no existe ningún `SampleSet` en `EstadoSampleSet.ABIERTO` (porque todos los anteriores ya se cerraron), inserta una nueva fila en `sample_sets` con `estado = EstadoSampleSet.ABIERTO`, `es_pompe_urgente = False`, `cerrado_en = None`.
+3. Si no existe ningún `SampleSet` en `EstadoSampleSet.ABIERTO` (porque todos los anteriores ya se cerraron), inserta una nueva fila en `sample_sets` con `estado = EstadoSampleSet.ABIERTO`, `es_pompe_urgente = False`, `cerrado_en = None` y registra en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'creacion'`, `origen = origen_operacion`).
 **Timeout**: 3s
 **Input**: `{ muestra_id: 149 }`
 **Output on SUCCESS**: `{ sample_set_abierto }` (con `< 10` muestras) -> GO TO STEP 3
@@ -112,7 +109,7 @@ Evento interno disparado automáticamente al finalizar el **STEP 3 del Escenario
 ### STEP 3: Asociación de la Muestra al Sample Set y evaluación de cierre (lote de 10)
 **Actor**: `service` (`LogisticaService.armar_sample_set`) -> `repo` (`SampleSetRepo`, `MuestraRepo`, `EstudioRepo`, `AvisoRepo`)
 **Action**:
-1. Asigna `muestra.sample_set_id = sample_set.id` en la tabla `muestras`.
+1. Asigna `muestra.sample_set_id = sample_set.id` en la tabla `muestras` y registra la incorporación en `registro_modificaciones` sobre `SampleSet` (`entidad_tipo = 'sample_set'`, `entidad_id = sample_set.id`, `accion = 'modificacion'`, `cambios = {"muestras_ids": ...}`).
 2. Si el `Estudio` de la muestra tiene `estudio.es_pompe_urgente == True`, marca `sample_set.es_pompe_urgente = True` (ver detalle en Escenario 14).
 3. Recuenta las muestras válidas del `SampleSet` (`cantidad = len([m for m in sample_set.muestras if m.motivo_descarte is None])`).
 4. **Rama A – Lote aún incompleto (`cantidad < 10` y `not sample_set.es_pompe_urgente`)**:
@@ -120,7 +117,8 @@ Evento interno disparado automáticamente al finalizar el **STEP 3 del Escenario
    - Mantiene `estudio.estado = EstadoEstudio.EN_LAB_CENTRAL` para todas las muestras del lote (esperando a que ingresen más muestras ese mismo día o en los días siguientes hasta llegar a 10).
 5. **Rama B – Lote completo (`cantidad == 10`) o cierre urgente (`sample_set.es_pompe_urgente == True`)**:
    - Sella el lote: actualiza `sample_set.estado = EstadoSampleSet.CERRADO` y `sample_set.cerrado_en = now()`.
-   - Actualiza el estado de **todos** los `Estudio`s cuyas muestras integran ese `SampleSet` de `EstadoEstudio.EN_LAB_CENTRAL` a `EstadoEstudio.EN_ESPERA_RETIRO`.
+   - Registra el cierre en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'cambio_estado'`, `cambios = {"estado": {"anterior": "abierto", "nuevo": "cerrado"}, "es_pompe_urgente": ...}`).
+   - Actualiza el estado de **todos** los `Estudio`s cuyas muestras integran ese `SampleSet` de `EstadoEstudio.EN_LAB_CENTRAL` a `EstadoEstudio.EN_ESPERA_RETIRO` y registra cada transición en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`).
    - Crea un `Aviso` interno (`CanalAviso.APP`) para los usuarios con `Rol.ADMINISTRATIVO` informando que el `SampleSet` está cerrado y `En espera de retiro`.
    - Si en la misma entrega del `Transportista` quedaron más muestras pendientes de agrupar, abre un nuevo `SampleSet` (`EstadoSampleSet.ABIERTO`) y repite STEP 2–3 para las muestras restantes.
 **Timeout**: 5s
@@ -188,8 +186,6 @@ SampleSet (EstadoSampleSet):
 
 Estudio (EstadoEstudio):
 [En laboratorio central]
-  -- (STEP 1: muestra < 2 ml) -----------------------------------> [Remuestreo requerido] (Escenario 10)
-[En laboratorio central]
   -- (STEP 3 Rama A: lote aún tiene < 10 muestras) --------------> [En laboratorio central]
 [En laboratorio central]
   -- (STEP 3 Rama B: el SampleSet llega a 10 muestras y cierra) -> [En espera de retiro]
@@ -204,7 +200,7 @@ Estudio (EstadoEstudio):
 **Payload**:
 ```json
 {
-  "mililitros": 4.50
+  "muestra_id": 149
 }
 ```
 **Success response** (`200 OK`):
@@ -287,7 +283,7 @@ Estudio (EstadoEstudio):
 
 | # | Finding | Severity | Spec section affected | Resolution |
 |---|---|---|---|---|
-| RC-1 | En `app/src/core/models/reglas.py` están definidas las constantes `MUESTRAS_POR_SAMPLE_SET = 10` y `ML_MINIMOS_TUBO = Decimal("2")`. | Low | Overview / STEP 1 & 3 | Se utilizan exactamente dichas constantes del modelo de dominio. |
+| RC-1 | **[BRECHA DETECTADA]** En `app/src/core/models/reglas.py`, `logistica_service.py` y `tests/test_escenario_11_logistica.py` aún existen la constante obsoleta `ML_MINIMOS_TUBO = Decimal("2")`, el motivo `VOLUMEN_INSUFICIENTE` y falta de llamadas a `AuditoriaService`. Tras Requerimientos 5 y 6 (ADR-003/ADR-004), solo aplica `MUESTRAS_POR_SAMPLE_SET = 10` sin validación de `< 2 ml`. | High | Overview, STEP 1, STEP 3 | Deprecar `ML_MINIMOS_TUBO` / `VOLUMEN_INSUFICIENTE`, actualizar `logistica_service.py` y agregar `AuditoriaService` en `SampleSet`/`Estudio`. |
 | RC-2 | En `.ai/3-Escenarios.md` (Escenario 12), el campo `Actores` está vacío porque es un proceso 100% automático del sistema cuando las muestras llegan al laboratorio central (`.ai/1-Entrevista.md` línea 271: `"automáticamente, sin que nadie opere, tiene que dispararse la lógica que le conté de los lotes, que a los lotes le vamos a llamar sample sets"`). | Low | Actors / Trigger | Especificado como proceso automático disparado por la llegada de muestras al laboratorio central. |
 | RC-3 | Si un `Transportista` entrega de una sola vez 12 muestras cuando el `SampleSet` actual ya tenía 5 muestras (total 17), un bucle ingenuo podría meter las 17 en el mismo `SampleSet`. | High | STEP 3 | Especificado que al llegar a `MUESTRAS_POR_SAMPLE_SET = 10` se cierra inmediatamente el `SampleSet` actual (`10/10`) y las 7 muestras excedentes crean un nuevo `SampleSet` en `EstadoSampleSet.ABIERTO` (`7/10`). |
 
@@ -297,12 +293,12 @@ Estudio (EstadoEstudio):
 
 | Test | Trigger | Expected behavior |
 |---|---|---|
-| `TC-01`: Creación de nuevo `SampleSet` abierto al llegar la primera muestra | Ingresa 1 muestra válida (`4.0 ml`) sin ningún `SampleSet` abierto previo | Se crea un `SampleSet` con `estado == EstadoSampleSet.ABIERTO`, `len(sample_set.muestras) == 1`; el `Estudio` permanece en `EstadoEstudio.EN_LAB_CENTRAL`. |
+| `TC-01`: Creación de nuevo `SampleSet` abierto al llegar la primera muestra | Ingresa 1 muestra válida (`motivo_descarte is None`) sin ningún `SampleSet` abierto previo | Se crea un `SampleSet` con `estado == EstadoSampleSet.ABIERTO`, `len(sample_set.muestras) == 1`; el `Estudio` permanece en `EstadoEstudio.EN_LAB_CENTRAL`; se registra creación en `registro_modificaciones`. |
 | `TC-02`: Acumulación de muestras sin cerrar lote (`< 10` muestras) | Ingresan 8 muestras adicionales no urgentes al `SampleSet` abierto (total 9) | El `SampleSet` sigue en `EstadoSampleSet.ABIERTO` (`cerrado_en is None`) y los 9 estudios permanecen en `EstadoEstudio.EN_LAB_CENTRAL`. |
-| `TC-03`: Cierre automático del `SampleSet` al llegar la décima muestra | Ingresa la muestra número 10 (`3.5 ml`) al `SampleSet` que tenía 9 muestras | `sample_set.estado == EstadoSampleSet.CERRADO`, `sample_set.cerrado_en is not None`, y los **10** `Estudio`s pasan atómicamente a `EstadoEstudio.EN_ESPERA_RETIRO`. |
+| `TC-03`: Cierre automático del `SampleSet` al llegar la décima muestra | Ingresa la muestra número 10 válida al `SampleSet` que tenía 9 muestras | `sample_set.estado == EstadoSampleSet.CERRADO`, `sample_set.cerrado_en is not None`, los **10** `Estudio`s pasan atómicamente a `EstadoEstudio.EN_ESPERA_RETIRO` y todo queda asentado en `registro_modificaciones`. |
 | `TC-04`: Partición automática en múltiples lotes cuando ingresan más de 10 muestras | `SampleSet` abierto tiene 8 muestras e ingresan 5 muestras nuevas en el mismo viaje | Las primeras 2 completan y cierran el `SampleSet #1` (`10/10`, `CERRADO`, estudios en `EN_ESPERA_RETIRO`); las 3 restantes abren un nuevo `SampleSet #2` (`3/10`, `ABIERTO`, estudios en `EN_LAB_CENTRAL`). |
 | `TC-05`: Inmutabilidad de un `SampleSet` cerrado | Llega una nueva muestra luego de que el `SampleSet #1` pasó a `EstadoSampleSet.CERRADO` | El `SampleSet #1` no se modifica jamás; la nueva muestra se asigna a un `SampleSet #2` nuevo. |
-| `TC-06`: Exclusión automática de muestra con menos de 2 ml | Ingresa una muestra al laboratorio central con `mililitros = Decimal("1.80")` | La muestra no se agrega al `SampleSet` (`sample_set_id is None`), se marca con `MotivoDescarte.VOLUMEN_INSUFICIENTE` y su `Estudio` pasa a `EstadoEstudio.REMUESTREO_REQUERIDO`. |
+| `TC-06`: Exclusión de muestra descartada o con estado distinto de `EN_LAB_CENTRAL` | Ingresa solicitud sobre muestra con `motivo_descarte = DESNATURALIZADA` o estudio en otro estado | La muestra no se agrega al `SampleSet` (`409 Conflict` / `MUESTRA_NO_APTA_PARA_SAMPLE_SET`). *(Cualquier volumen en `ml` sin descarte previo es aceptado sin límite de 2 ml.)* |
 | `TC-07`: Concurrencia al cerrar lote entre dos entregas simultáneas | Dos transacciones concurrentes intentan agregar las muestras 10 y 11 al mismo tiempo | El bloqueo `SELECT ... FOR UPDATE` sobre el `SampleSet` abierto garantiza que el primer lote quede exactamente con 10 muestras y la muestra 11 cree un segundo `SampleSet`. |
 
 ---
@@ -322,3 +318,4 @@ Estudio (EstadoEstudio):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/logistica.py`, `estudios.py`, `enums.py` y `reglas.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Actualización mayor v2.0 por Requerimientos 5 y 6 (ADR-003 y ADR-004): eliminada por completo la regla `< 2 ml` (`ML_MINIMOS_TUBO` / `VOLUMEN_INSUFICIENTE`), incorporada auditoría en `registro_modificaciones` para `SampleSet` y `Estudio`, y documentada brecha RC-1 contra el código actual. | Actualizada a v2.0. |
