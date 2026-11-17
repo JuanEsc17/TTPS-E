@@ -1,0 +1,123 @@
+"""Repositorio de acceso a datos para patologias, sintomas y genes."""
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import selectinload
+from src.core.database import db
+from src.core.models import Gen, Patologia, PatologiaGen, PatologiaSintoma, Sintoma
+
+
+def listar_patologias() -> list[Patologia]:
+    stmt = (
+        select(Patologia)
+        .options(
+            selectinload(Patologia.sintomas).selectinload(PatologiaSintoma.sintoma),
+            selectinload(Patologia.genes),
+        )
+        .order_by(Patologia.nombre.asc())
+    )
+    return list(db.session.scalars(stmt).all())
+
+
+def buscar_patologia_por_id(patologia_id: int, *, for_update: bool = False) -> Patologia | None:
+    stmt = (
+        select(Patologia)
+        .options(
+            selectinload(Patologia.sintomas).selectinload(PatologiaSintoma.sintoma),
+            selectinload(Patologia.genes),
+        )
+        .where(Patologia.id == patologia_id)
+    )
+    if for_update:
+        stmt = stmt.with_for_update()
+    return db.session.scalar(stmt)
+
+
+def buscar_patologia_por_nombre(nombre: str, *, excluir_id: int | None = None) -> Patologia | None:
+    stmt = select(Patologia).where(func.lower(Patologia.nombre) == nombre.strip().lower())
+    if excluir_id is not None:
+        stmt = stmt.where(Patologia.id != excluir_id)
+    return db.session.scalar(stmt)
+
+
+def upsert_sintomas(sintomas: list[dict[str, str]]) -> dict[str, Sintoma]:
+    """Asegura en `sintomas` cada snomed_id y devuelve el mapa snomed_id -> Sintoma."""
+    codigos = [s["snomed_id"] for s in sintomas]
+    existentes = {
+        s.snomed_id: s
+        for s in db.session.scalars(select(Sintoma).where(Sintoma.snomed_id.in_(codigos))).all()
+    }
+    for item in sintomas:
+        snomed_id = item["snomed_id"]
+        if snomed_id in existentes:
+            existentes[snomed_id].descripcion = item["descripcion"]
+        else:
+            nuevo = Sintoma(snomed_id=snomed_id, descripcion=item["descripcion"])
+            db.session.add(nuevo)
+            existentes[snomed_id] = nuevo
+    db.session.flush()
+    return existentes
+
+
+def guardar_patologia_con_sintomas(
+    *,
+    patologia: Patologia | None,
+    nombre: str,
+    descripcion: str | None,
+    sintoma_cardinal_id: int,
+    sintomas_secundarios_ids: list[int],
+) -> Patologia:
+    """Crea o actualiza `Patologia` y reemplaza atómicamente `PatologiaSintoma`."""
+    if patologia is None:
+        patologia = Patologia(nombre=nombre, descripcion=descripcion)
+        db.session.add(patologia)
+        db.session.flush()
+    else:
+        patologia.nombre = nombre
+        patologia.descripcion = descripcion
+        # flush() tras DELETE evita violar el indice parcial uq_un_cardinal_por_patologia
+        db.session.execute(delete(PatologiaSintoma).where(PatologiaSintoma.patologia_id == patologia.id))
+        db.session.flush()
+
+    db.session.add(PatologiaSintoma(patologia_id=patologia.id, sintoma_id=sintoma_cardinal_id, es_cardinal=True))
+    for sec_id in sintomas_secundarios_ids:
+        db.session.add(PatologiaSintoma(patologia_id=patologia.id, sintoma_id=sec_id, es_cardinal=False))
+    db.session.flush()
+    return patologia
+
+
+def sincronizar_genes_patologia(patologia_id: int, genes_info: list[dict[str, object]]) -> list[Gen]:
+    """Upsert de genes y reemplazo de asociaciones en `patologias_genes`."""
+    simbolos = [str(g["simbolo"]).strip().upper() for g in genes_info if str(g.get("simbolo", "")).strip()]
+    db.session.execute(delete(PatologiaGen).where(PatologiaGen.patologia_id == patologia_id))
+    if not simbolos:
+        db.session.commit()
+        return []
+
+    existentes = {
+        g.simbolo.upper(): g
+        for g in db.session.scalars(select(Gen).where(Gen.simbolo.in_(simbolos))).all()
+    }
+    genes_asociados: list[Gen] = []
+    vistos: set[str] = set()
+    for info in genes_info:
+        simbolo = str(info.get("simbolo", "")).strip().upper()
+        if not simbolo or simbolo in vistos:
+            continue
+        vistos.add(simbolo)
+        gen = existentes.get(simbolo)
+        if gen is None:
+            gen = Gen(
+                simbolo=simbolo,
+                nombre=str(info["nombre"]) if info.get("nombre") else None,
+                es_hallazgo_secundario=bool(info.get("es_hallazgo_secundario", False)),
+            )
+            db.session.add(gen)
+            existentes[simbolo] = gen
+        elif info.get("nombre") and not gen.nombre:
+            gen.nombre = str(info["nombre"])
+        genes_asociados.append(gen)
+
+    db.session.flush()
+    for gen in genes_asociados:
+        db.session.add(PatologiaGen(patologia_id=patologia_id, gen_id=gen.id))
+    db.session.commit()
+    return genes_asociados
