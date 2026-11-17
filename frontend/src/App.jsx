@@ -5,6 +5,7 @@ import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
+import RegistroMedicoPage from "./pages/RegistroMedicoPage";
 import cambiarPasswordPage from "./pages/CambiarPasswordPage";
 
 const RUTAS_INICIO = [
@@ -67,6 +68,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage sesion={sesion} onSesion={manejarSesion} />} />
+        <Route path="/registro-medico" element={<RegistroMedicoPage sesion={sesion} />} />
         <Route
           path="/cambiar-password-inicial"
           element={<CambiarPasswordInicialPage sesion={sesion} onSesion={manejarSesion} />}

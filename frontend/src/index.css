@@ -11,3 +11,11 @@
 .font-titulo {
     font-family: Georgia, Cambria, "Times New Roman", serif;
 }
+
+.tarjeta-cristal {
+    @apply overflow-hidden rounded-2xl border border-white/80 bg-gradient-to-br from-white/85 via-white/75 to-[#EAF3FA]/80 shadow-lg shadow-[#0B4F8A]/10 backdrop-blur-md;
+}
+
+.campo-clinico {
+    @apply w-full rounded-xl border border-slate-300/80 bg-[#E6EFF7]/80 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 transition focus:border-[#0B4F8A] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#0B4F8A]/15;
+}
