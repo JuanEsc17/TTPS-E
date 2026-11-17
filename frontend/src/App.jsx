@@ -6,11 +6,12 @@ import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
+import CambiarPasswordPage from "./pages/CambiarPasswordPage";
+import PatologiasPage from "./pages/PatologiasPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
   { path: "/medico/estudios", titulo: "Estudios médicos" },
-  { path: "/gerencia/patologias", titulo: "Gestión de patologías" },
   { path: "/administracion/estudios", titulo: "Panel administrativo" },
   { path: "/bioinformatica/cola", titulo: "Cola de bioinformática" },
   { path: "/transporte/orden-del-dia", titulo: "Orden del día" },
@@ -81,6 +82,14 @@ export default function App() {
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}
+          <Route
+            path="/cambiar-password"
+            element={<CambiarPasswordPage sesion={sesion} onSesion={manejarSesion} />}
+          />
+          <Route
+            path="/gerencia/patologias"
+            element={<PatologiasPage sesion={sesion} />}
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

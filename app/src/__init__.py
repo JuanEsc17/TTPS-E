@@ -13,6 +13,7 @@ load_dotenv()
 from .web.api.auth import auth_bp
 from .web.api.logistica import logistica_bp
 from .web.api.medicos import medicos_bp
+from .web.api.patologias import patologias_bp
 from .web.handlers.errors import registrar_manejadores_errores
 
 
@@ -68,5 +69,6 @@ def create_app(config: dict | None = None) -> Flask:
 
     app.register_blueprint(turnos_bp)
     app.register_blueprint(logistica_bp)
+    app.register_blueprint(patologias_bp)
 
     return app

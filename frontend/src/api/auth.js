@@ -125,3 +125,32 @@ export async function reenviarCodigoRequest(challengeToken) {
 
     return data
 }
+
+export async function cambiarPasswordRequest({
+    token,
+    passwordActual,
+    passwordNueva,
+    confirmacion,
+}) {
+    const resp = await fetch("/api/v1/auth/cambiar-password", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+            password_actual: passwordActual,
+            password_nueva: passwordNueva,
+            password_nueva_confirmacion: confirmacion,
+        })
+    })
+
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok || !data.ok) {
+        const err = new Error(data.error || "No se pudo actualizar la contraseña.")
+        err.code = data.code
+        err.status = resp.status
+        throw err
+    }
+    return data
+}

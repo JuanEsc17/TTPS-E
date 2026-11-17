@@ -50,7 +50,10 @@ export default function Layout({ sesion, onCerrarSesion }) {
 
     const { usuario } = sesion;
     const itemsMenu = MENU_POR_ROL[usuario?.rol] || [];
-    const itemActivo = itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
+    const itemActivo =
+        pathname === "/cambiar-password"
+            ? "Cambiar contraseña"
+            : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
 
     const contenidoSidebar = (
         <div className="relative flex h-full flex-col justify-between overflow-hidden bg-gradient-to-b from-[#062846] via-[#093D6B] to-[#0B4F8A] p-4 text-white">
@@ -97,7 +100,20 @@ export default function Layout({ sesion, onCerrarSesion }) {
                 </nav>
             </div>
 
-            <div className="relative space-y-3 border-t border-white/15 pt-3">
+            <div className="relative space-y-2 border-t border-white/15 pt-3">
+                <NavLink
+                    to="/cambiar-password"
+                    onClick={() => setMenuAbierto(false)}
+                    className={({ isActive }) =>
+                        `flex items-center gap-2 rounded-xl px-3 py-2 text-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300 ${isActive
+                            ? "border border-white/20 bg-white/15 font-semibold text-white shadow-xs"
+                            : "text-cyan-100/80 hover:bg-white/10 hover:text-white"
+                        }`
+                    }
+                >
+                    <span className="h-1.5 w-1.5 rounded-full bg-cyan-300" aria-hidden="true" />
+                    Cambiar contraseña
+                </NavLink>
                 <button
                     type="button"
                     onClick={handleCerrarSesion}

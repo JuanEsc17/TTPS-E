@@ -8,6 +8,7 @@ from src.core.services.seguridad import (
 from src.web.decorators.auth import extraer_payload_opcional, requiere_sesion
 from src.web.validators.auth_validator import (
     CambiarPasswordInicialSchema,
+    CambiarPasswordSchema,
     LoginSchema,
     ReenviarCodigoSchema,
     VerificarDispositivoSchema,
@@ -90,6 +91,21 @@ def reenviar_codigo_dispositivo():
     resultado = auth_service.reenviar_codigo_dispositivo(
         usuario_id=g.usuario_actual.id,
         dispositivo_identificador=datos["dispositivo_identificador"],
+        token_payload=g.token_payload,
+    )
+    return jsonify({"ok": True, **resultado}), 200
+
+
+@auth_bp.post("/cambiar-password")
+@requiere_sesion()
+def cambiar_password():
+    payload = request.get_json(silent=True) or {}
+    datos = CambiarPasswordSchema().load(payload)
+    resultado = auth_service.cambiar_password(
+        usuario_id=g.usuario_actual.id,
+        password_actual=datos["password_actual"],
+        password_nueva=datos["password_nueva"],
+        password_nueva_confirmacion=datos["password_nueva_confirmacion"],
         token_payload=g.token_payload,
     )
     return jsonify({"ok": True, **resultado}), 200

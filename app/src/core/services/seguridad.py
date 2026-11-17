@@ -59,19 +59,23 @@ def emitir_token(
 _REGEX_LETRA = re.compile(r"[A-Za-z]")
 _REGEX_DIGITO = re.compile(r"\d")
 
-def validar_politica_password(password: str, codigo: str = "NUEVA_PASSWORD_INVALIDA") -> None:
+def validar_politica_password(
+    password: str,
+    codigo: str = "NUEVA_PASSWORD_INVALIDA",
+    http_status: int = 400,
+) -> None:
     if len(password) < 8 or len(password) > 128:
         raise ErrorDominio(
             "La contrasena debe tener entre 8 y 128 caracteres.",
             codigo=codigo,
-            http_status=400
+            http_status=http_status,
         )
-    
+
     if not _REGEX_LETRA.search(password) or not _REGEX_DIGITO.search(password):
         raise ErrorDominio(
             "La contrasena debe incluir al menos una letra y un numero.",
             codigo=codigo,
-            http_status=400
+            http_status=http_status,
         )
 
 def decodificar_token(token: str, secret_key:str) -> dict[str, Any]:
