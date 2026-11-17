@@ -4,7 +4,10 @@ import FondoAdn from "./FondoAdn";
 import LogoAdn from "./LogoAdn";
 
 const MENU_POR_ROL = {
-    paciente: [{ to: "/paciente/estudios", label: "Mis estudios" }],
+    paciente: [
+        { to: "/paciente/estudios", label: "Mis estudios" },
+        { to: "/chatbot", label: "Asistente de patologías" },
+    ],
     medico: [{ to: "/medico/estudios", label: "Estudios" }],
     gerente_medico: [{ to: "/gerencia/patologias", label: "Patologías" }],
     administrativo: [{ to: "/administracion/estudios", label: "Carga de datos ACTG" }],

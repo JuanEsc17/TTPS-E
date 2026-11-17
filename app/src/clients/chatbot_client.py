@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from typing import Any, Self
 
 import httpx
 
@@ -22,7 +22,7 @@ class ChatbotClient:
         base_url: str | None = None,
         apikey: str | None = None,
         token: str | None = None,
-        timeout: float = 20.0,
+        timeout: float | None = None,
         client: httpx.Client | None = None,
     ):
         self.base_url = (
@@ -37,8 +37,28 @@ class ChatbotClient:
             or APIKEY_PUBLISHABLE_DEFAULT
         )
         self.token = token or os.environ.get("CHATBOT_TOKEN", "")
-        self.timeout = timeout
+        if timeout is not None:
+            self.timeout = float(timeout)
+        else:
+            raw_timeout = os.environ.get("CHATBOT_API_TIMEOUT_SECONDS", "").strip()
+            try:
+                parsed = float(raw_timeout) if raw_timeout else 10.0
+                self.timeout = parsed if parsed > 0 else 10.0
+            except ValueError:
+                self.timeout = 10.0
+        self._owns_client = client is None
         self._client = client or httpx.Client(timeout=self.timeout)
+
+    def close(self) -> None:
+        """Cierra el cliente HTTP si fue creado por esta instancia."""
+        if self._owns_client:
+            self._client.close()
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        self.close()
 
     def _headers(self) -> dict[str, str]:
         return {

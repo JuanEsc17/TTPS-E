@@ -7,6 +7,7 @@ import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
 import CambiarPasswordPage from "./pages/CambiarPasswordPage";
+import ChatbotPage from "./pages/ChatbotPage";
 import PatologiasPage from "./pages/PatologiasPage";
 
 const RUTAS_INICIO = [
@@ -89,6 +90,10 @@ export default function App() {
           <Route
             path="/gerencia/patologias"
             element={<PatologiasPage sesion={sesion} />}
+          />
+          <Route
+            path="/chatbot"
+            element={<ChatbotPage sesion={sesion} />}
           />
         </Route>
 
