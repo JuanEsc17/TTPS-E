@@ -60,7 +60,7 @@ Volviendo un poco para atrás, para poder armar un poco la cronología de cómo 
 El presupuesto.¿Qué querés saber del presupuesto?  
 O sea, cómo se lo manda, trabaja con obras sociales, se lo financia el paciente. Bien, están las dos modalidades.   
 Lo puede cubrir la obra social o lo puede pagar de manera particular. Cada obra social tiene un porcentaje de cobertura diferente. La lista de obras sociales con las que trabajamos y los porcentajes están definidos en una API, en un módulo que ya tenemos armado, que va a armar un equipo con el cual vamos a incorporar.  
-Así que pueden utilizar esa API para poder consumirlo y mostrárselo al usuario.Y en el caso de que sea particular, el usuario va a acceder a la página para poder realizar el pago. El pago, en principio, va a ser simulado, porque todavía no tenemos Mercado Libre puesto a punto, así que por ahora me alcanza con que simulen que pagó X plata.  
+Así que pueden utilizar esa API para poder consumirlo y mostrárselo al usuario.Y en el caso de que sea particular, el usuario va a acceder a la página para poder realizar el pago. ~~El pago, en principio, va a ser simulado, porque todavía no tenemos Mercado Libre puesto a punto, así que por ahora me alcanza con que simulen que pagó X plata.~~ **[ACTUALIZADO – Ver Anexo Segunda Reunión: El pago particular se implementa con MercadoPago y admite pago en cuotas.]**  
 Lo que sí es importante es que quede un registro financiero de todas las operaciones, porque más adelante voy a querer desarrollar un tablero de control y quiero saber cuánta plata tengo, cuánta deuda tengo por obra social, por paciente. Así que eso es información que necesito registrar desde el principio. 
 
 Después de que el paciente pague, ¿qué pasa?   
@@ -157,7 +157,7 @@ En el momento en el que se carga ese resultado, ¿se le avisa al médico, al pac
 A los dos. Sí. 
 
 ¿Hay alguna posibilidad de volver a un estadio previo en todo ese flujo del estudio?  
-Una vez que se avanza a un siguiente paso, ya no es posible volver. En algunos casos, la muestra, por alguna razón de mal mantenimiento, el ADN se puede haber desnaturalizado. Entonces, cuando se intenta hacer el estudio, no hay ADN suficiente. En ese caso, hay que volver a tomar la muestra para ese paciente.
+~~Una vez que se avanza a un siguiente paso, ya no es posible volver.~~ **[ACTUALIZADO – Ver Anexo Segunda Reunión: Si la muestra llega a Corea con baja calidad, el administrativo debe marcar que se necesita remuestreo y volver el estudio para atrás a `Remuestreo requerido`.]** En algunos casos, la muestra, por alguna razón de mal mantenimiento, el ADN se puede haber desnaturalizado. Entonces, cuando se intenta hacer el estudio, no hay ADN suficiente. En ese caso, hay que volver a tomar la muestra para ese paciente.
 
 ¿Y el costo?   
 No tiene costo para el paciente porque fue un error nuestro, básicamente. 
@@ -183,7 +183,7 @@ Exactamente, sí. Y de hecho, cuando es por hora social, el trámite tiene que s
  La autorización la hace el administrativo. Lo gestiona por afuera, por teléfono. Le avisan y él carga directamente que ya fue autorizado ese estudio o rechazado. Y en caso de que sea rechazado, ahí estaría bueno que el paciente pueda cargar una demanda asociada a ese estudio y pedir la reautorización. Eso nos pasa muy seguido, porque las obras sociales nunca quieren pagar estos estudios.Entonces nos rechazan o le rechazan al paciente el estudio, después va a juicio y el juicio se lo suelen ganar. Entonces ahí avanzan con el estudio. 
 
 ¿El estudio solo se puede pagar en un solo pago o se puede en cuotas?   
-No, un solo pago. 
+~~No, un solo pago.~~ **[ACTUALIZADO – Ver Anexo Segunda Reunión: Se da soporte al pago por cuotas implementado con MercadoPago, y el administrativo puede ver las cuotas de los pacientes.]** 
 
 ¿El paciente podría aportar documentación o algo relacionado con el estudio que fue rechazado por la obra social, la cobertura?  
  En caso de que se haga el rechazo, siempre te va a venir un escrito de por qué. Te va a decir que no hay evidencia suficiente de que este estudio sirva para mejorar la salud del paciente. ¿Vos me preguntás si el paciente tiene que subir documentación? Claro, en ese caso podría subir documentación para.  
@@ -225,7 +225,7 @@ No, por ahora no. La gerencia lo único que va a hacer es acceder al tablero, pe
 No, es el administrativo del central, del laboratorio central. Acordate que los laboratorios de extracción básicamente no operan en el sistema. Lo único que necesitamos es que nos manden un mensaje al número que les dije del laboratorio central, pero no necesitan entrar al sistema. Piensen que los laboratorios de extracción no son todos nuestros. Por ejemplo, tercerizamos en Rossi, en Buenos Aires, acá en Dagostino y en Tucumán, en mi laboratorio. Son distintos laboratorios, así que no es un rol del sistema. 
 
 Y de la muestra de sangre, cuando se hizo el análisis, ¿esa muestra queda asociada a los datos del paciente? ¿Hay algo que prefieras guardar de eso?   
-Vamos a registrar la cantidad de mililitros que tiene el tubo, si viene con menos de 2 mililitros, hay que remuestrear  
+~~Vamos a registrar la cantidad de mililitros que tiene el tubo, si viene con menos de 2 mililitros, hay que remuestrear~~ **[ACTUALIZADO – Ver Anexo Segunda Reunión: Se elimina la regla y posibilidad de muestra menor a 2 ml; el remuestreo ocurre cuando llega la muestra a Corea con baja calidad (u otro fallo de calidad) y el administrativo retrocede el estudio.]**  
    
 ¿Todo lo paga el paciente o?   
 No, no, todo incluido por nosotros  
@@ -353,8 +353,8 @@ Eso también está tercerizado, con lo cual no tenemos que resolverlo en el sist
    
 ¿Se puede pagar con tarjeta y con efectivo? 
 
-Por ahora el pago lo vamos a hacer, cuando es pago particular, lo vamos a hacer simulado. Porque todavía no definimos cómo van a ser los medios de pago.  
- Así que, por ahora, yo lo que sí necesito es que quede registrado financieramente el pago para poder saber el crédito que tengo. Entonces, el pago simplemente se simula que el paciente pone un precio y pone pagar.  
+~~Por ahora el pago lo vamos a hacer, cuando es pago particular, lo vamos a hacer simulado. Porque todavía no definimos cómo van a ser los medios de pago.~~ **[ACTUALIZADO – Ver Anexo Segunda Reunión: El pago particular se implementa con MercadoPago y soporte para pago por cuotas.]**
+ Así que, por ahora, yo lo que sí necesito es que quede registrado financieramente el pago para poder saber el crédito que tengo. ~~Entonces, el pago simplemente se simula que el paciente pone un precio y pone pagar.~~ **[ACTUALIZADO: El paciente selecciona pago único o cantidad de cuotas y paga a través de MercadoPago.]**
 Ahora que preguntaste eso, me hiciste acordar que tenemos cupones de descuento. Entonces, el paciente, cuando va a pagar, le aparece el precio, tiene el botón pagar, puede decir aplicar cupón.
 
 ¿Y como obtiene el cupon?  
@@ -509,5 +509,37 @@ Sobre los bots, los equipos estos, ya vamos a profundizar en una nueva reunión 
 Bueno, por acá estamos.
 
 Damos por concluida la entrevista, gracias.  
-   
-   
+
+---
+
+## **Anexo: Segunda Reunión – Nuevos Requerimientos**
+
+En una instancia posterior de relevamiento, el cliente definió los siguientes cambios y nuevos requerimientos sobre el sistema:
+
+1. **Pago por cuotas implementado con MercadoPago:**
+   - Se deja sin efecto la restricción previa de pago simulado exclusivamente en un solo pago.
+   - El pago particular del presupuesto de un estudio se realiza a través de **MercadoPago**, brindando soporte tanto para un único pago como para el **pago por cuotas** (plan de cuotas con vencimientos periódicos abonados mediante MercadoPago).
+   - El descuento de un cupón vigente se aplica antes de conformar el plan de cuotas y se consume al confirmarse el pago inicial / primera cuota vía webhook de MercadoPago.
+   - El pago de la primera cuota (o pago único) confirmado habilita al paciente para sacar turno de extracción.
+
+2. **Autorización de múltiples médicos para ver la historia clínica del paciente:**
+   - Además del médico tratante que dio de alta al paciente, el **paciente** puede agregar a varios **médicos** registrados en el sistema para otorgarles autorización explícita de acceso y lectura sobre su **historia clínica** (y revocar dicho permiso cuando lo desee).
+
+3. **Visibilidad de cuotas de pacientes para el administrativo:**
+   - El **administrativo** del laboratorio central debe poder visualizar las **cuotas** de los **pacientes** (cuotas pagadas, pendientes, vencidas y anuladas, fechas de vencimiento, montos e identificadores de operación en MercadoPago) para realizar el seguimiento financiero, de caja y de retrasos en los pagos.
+
+4. **Vinculación automática de estudios de familiares del familiograma y consulta cruzada:**
+   - Cuando un **familiar** que figura en el **familiograma** de un paciente original se realiza un **estudio** en el laboratorio, dicho estudio debe vincularse **automáticamente** con la tabla de estudios del paciente original (y recíprocamente).
+   - Para facilitar la identificación automática determinística, al cargar un familiar en el familiograma se puede registrar su DNI (y apellido), vinculándolo además si ya existe o cuando se da de alta como paciente.
+   - El **médico** debe poder visualizar y navegar directamente desde el estudio de un paciente `X` hacia el estudio vinculado del otro familiar `X'`.
+
+5. **Remuestreo por baja calidad al llegar la muestra a Corea y eliminación de la regla de 2 ml:**
+   - Se **elimina por completo** la posibilidad y regla de descarte de muestra menor a `2 ml`.
+   - Si cuando llega la **muestra** a Corea por alguna razón presenta **baja calidad**, el **administrativo** debe indicar que se requiere un **remuestreo** y **volver el estudio para atrás** al estado `Remuestreo requerido` (sin costo adicional para el paciente), notificando al paciente y al médico para que saque un nuevo turno.
+
+6. **Registro de modificaciones (auditoría) sobre sample sets, pacientes y estudios:**
+   - Se necesita mantener un **registro de todas las modificaciones** (altas, ediciones y cambios de estado/relaciones) que se realicen sobre los **sample sets**, **pacientes** y **estudios**, incluyendo quién realizó la modificación (usuario u origen automático del sistema), fecha y hora, campo(s) modificado(s), valor anterior, valor nuevo y motivo.
+
+7. **Fecha de reevaluación anual ante diagnóstico VUS:**
+   - Cuando el diagnóstico del estudio resulta **VUS** (variante de significado incierto, sin variante patogénica confirmatoria), el sistema debe calcular y guardar explícitamente la **fecha** en que se debe realizar un nuevo estudio / reevaluación dentro de **un año** (`fecha_resultado + 1 año`), informándolo en el resultado y en los avisos al médico y al paciente.
+

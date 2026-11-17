@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 2 – Dar de alta un estudio
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-2`
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Médico` (médico tratante, médico derivante), `Gerente médico`, `Paciente`, `Administrativo` |
-| **Objetos** | `Estudio` (sinónimo: `sample`), `Paciente`, `Patología`, `Gen`, `Hallazgo secundario`, `API de bioinformática`, `Obra social`, `API de obras sociales`, `Pompe urgente`, `Aviso` |
-| **Verbos** | `Dar de alta estudio` |
+| **Objetos** | `Estudio` (sinónimo: `sample`), `Paciente`, `Patología`, `Gen`, `Hallazgo secundario`, `API de bioinformática`, `Obra social`, `API de obras sociales`, `Pompe urgente`, `Vínculo de estudios familiares`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Dar de alta estudio`, `Vincular estudios familiares`, `Registrar modificación` |
 | **Estados** | `Creado`, `Pendiente de autorización` |
 
 ---
@@ -120,8 +120,10 @@ El `Médico` selecciona al `Paciente`, configura los `Genes` y `Hallazgos secund
    - `es_pompe_urgente = (patologia.nombre.lower() == "pompe") and (edad_en_meses(paciente.fecha_nacimiento, fecha_actual) < 4)`.
 2. Determina el estado inicial en la tabla `estudios`:
    - Por definición del LEL (`Verbo: Dar de alta estudio` y `Estado: Creado`), el `Estudio` se crea con `estado = EstadoEstudio.CREADO` y `ausencias = 0`.
-3. Inserta la fila en `estudios` (`paciente_id`, `medico_id`, `patologia_sospechada_id`, `estado = EstadoEstudio.CREADO`, `quiere_hallazgos_secundarios`, `obra_social_id`, `es_pompe_urgente`, `ausencias = 0`).
+3. Inserta la fila en `estudios` (`paciente_id`, `medico_id`, `patologia_sospechada_id`, `estado = EstadoEstudio.CREADO`, `quiere_hallazgos_secundarios`, `obra_social_id`, `es_pompe_urgente`, `ausencias = 0`, `fecha_reevaluacion_vus = None`).
 4. Inserta las filas en `estudios_genes` (`estudio_id`, `gen_id`, `origen`) para cada `(Gen, OrigenGen)`.
+5. **Vinculación automática con estudios familiares (Escenario 41)**: Busca en `familiares` si el `Paciente` figura como familiar en el familiograma de otro paciente (`Familiar.paciente_vinculado_id == paciente.id` o `Familiar.dni == paciente.dni`), así como si algún `Familiar` propio del paciente está vinculado a otro `Paciente` con estudios. Para cada coincidencia con estudios existentes, inserta automáticamente los vínculos simétricos en `estudios_familiares_vinculados` (`estudio_origen_id`, `estudio_relacionado_id`, `familiar_id`, `parentesco`).
+6. Registra la creación del estudio en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'creacion'`, `usuario_id = usuario_actual.id`, `origen = 'usuario'`).
 **Timeout**: `4s`
 **Input**: `Paciente`, `Medico`, `Patologia`, `obra_social_id`, `quiere_hallazgos_secundarios`, `es_pompe_urgente`, lista `(Gen, OrigenGen)`.
 **Output on SUCCESS**: `Estudio` persistido con `estudio.id` y `estudio.estado == EstadoEstudio.CREADO` -> `GO TO STEP 4`
@@ -320,3 +322,4 @@ El `Médico` selecciona al `Paciente`, configura los `Genes` y `Hallazgos secund
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/estudios.py` y `clinica.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Actualizada por Req. 4 (vinculación automática en `estudios_familiares_vinculados`) y Req. 6 (`registro_modificaciones`). | Actualizada a v1.1. |

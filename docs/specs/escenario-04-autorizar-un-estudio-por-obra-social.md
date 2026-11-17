@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 4 – Autorizar un estudio por obra social
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-4`
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Administrativo`, `Paciente` |
-| **Objetos** | `Estudio`, `Presupuesto`, `Obra social`, `API de obras sociales`, `Cupón`, `API de cupones`, `Aviso` |
-| **Verbos** | `Sacar turno` *(habilitado si el estudio resulta `Autorizado`)* |
+| **Objetos** | `Estudio`, `Presupuesto`, `Obra social`, `API de obras sociales`, `Cupón`, `API de cupones`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Sacar turno`, `Registrar modificación` *(habilitado si el estudio resulta `Autorizado`)* |
 | **Estados** | `Creado`, `Pendiente de autorización`, `Autorizado`, `Rechazado` |
 
 ---
@@ -125,9 +125,13 @@
    - `fecha = func.now()`
 2. **Si `resultado == ResultadoAutorizacion.AUTORIZADA`**:
    - Cambia `estudio.estado = EstadoEstudio.AUTORIZADO` (`"Autorizado"`).
+   - Registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = usuario_actual.id`, `cambios = {"estado": {"anterior": "Pendiente de autorizacion", "nuevo": "Autorizado"}}`).
    - Inserta una fila en `pagos`:
      - `presupuesto_id = presupuesto.id`
      - `tipo = TipoPago.OBRA_SOCIAL`
+     - `medio_pago = MedioPago.OBRA_SOCIAL`
+     - `estado = EstadoPago.PAGADO`
+     - `cantidad_cuotas = 1`
      - `monto_usd = monto_usd`
      - `cupon_id = cupon.id if cupon else None`
      - `descuento_cupon_usd = descuento_cupon_usd`
@@ -136,7 +140,8 @@
    - Si se usó `Cupón`, marca `cupon.usado = True`, `cupon.usado_en = func.now()` e invoca a la `API de cupones` (`POST /api/v1/cupones/{codigo}/consumir`) para vencerlo.
 3. **Si `resultado == ResultadoAutorizacion.RECHAZADA`**:
    - Cambia `estudio.estado = EstadoEstudio.RECHAZADO` (`"Rechazado"`).
-   - No inserta fila en `pagos`.
+   - Registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = usuario_actual.id`, `cambios = {"estado": {"anterior": "Pendiente de autorizacion", "nuevo": "Rechazado"}}`).
+   - No inserta fila en `pagos`. *(Nota: también se registra en `registro_modificaciones` el cambio de `obra_social_id` y `estado` cuando el paciente selecciona obra social en el subflujo `/obra-social` desde `Creado`).*
 **Timeout**: `5s`
 **Input**: `Estudio`, `Presupuesto`, `ResultadoAutorizacion`, importes calculados, `Cupon` (opcional).
 **Output on SUCCESS**: `Autorizacion` y `Pago` (si aplica) persistidos -> `GO TO STEP 4`
@@ -341,3 +346,4 @@
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/economia.py` y `estudios.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Actualizada con auditoría en `registro_modificaciones` sobre `Estudio` y campos `medio_pago`/`estado`/`cantidad_cuotas` en `Pago`. | Actualizada a v1.1. |

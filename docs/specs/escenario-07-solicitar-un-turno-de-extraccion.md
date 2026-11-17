@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 7 – Solicitar un turno de extracción
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-7`
 
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Paciente` |
-| **Objetos** | `Estudio`, `Centro de extracción`, `Turno`, `Orden de extracción`, `Consentimiento informado`, `Recordatorio`, `Presupuesto`, `Aviso` |
-| **Verbos** | `Sacar turno` |
+| **Objetos** | `Estudio`, `Centro de extracción`, `Turno`, `Orden de extracción`, `Consentimiento informado`, `Recordatorio`, `Presupuesto`, `Cuota`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Sacar turno`, `Registrar modificación` |
 | **Estados** | `Creado`, `Autorizado`, `Remuestreo requerido`, `Turno sacado` |
 
 ---
@@ -51,7 +51,7 @@
 - El `Centro de extracción` (`centros_extraccion.id == centro_id`) existe en la base de datos.
 - El `Estudio` (`estudios.id == estudio_id`) cumple **una** de las siguientes condiciones de habilitación:
   1. `estudio.estado == EstadoEstudio.AUTORIZADO`, **o**
-  2. `estudio.estado == EstadoEstudio.CREADO` y posee un `Pago` con `anulado == False` en `estudio.presupuesto.pagos`, **o**
+  2. `estudio.estado == EstadoEstudio.CREADO` y posee un `Pago` vigente con `anulado == False` y `estado in (EstadoPago.PAGADO, EstadoPago.PARCIAL)` (pago total o al menos cuota #1 abonada vía `MercadoPago`) en `estudio.presupuesto.pagos`, **o**
   3. `estudio.estado == EstadoEstudio.REMUESTREO_REQUERIDO`, **o**
   4. `estudio.estado == EstadoEstudio.TURNO_SACADO`, no tiene ningún `Turno` futuro con `activo == True` y `asistio is None` (porque el turno anterior ya pasó y fue marcado con `asistio == False`), y `estudio.ausencias < 5`.
 - No existe otro `Turno` con `activo == True` y `asistio is None` para ese mismo `estudio_id`.
@@ -72,7 +72,7 @@
 **Actor**: `router` (`turnos_router`) -> `service` (`turno_service`) -> `repo` (`estudio_repo`, `turno_repo`)
 **Action**:
 1. Verifica que el usuario autenticado tenga `Usuario.rol == Rol.PACIENTE` y sea el titular del `Estudio` (`estudio.paciente.usuario_id == usuario_actual.id`).
-2. Carga el `Estudio` con `SELECT ... FOR UPDATE` y verifica que esté habilitado para sacar turno (`AUTORIZADO`, `CREADO` con pago vigente `anulado == False`, `REMUESTREO_REQUERIDO`, o `TURNO_SACADO` tras ausencia con `ausencias < 5` y sin turno activo pendiente).
+2. Carga el `Estudio` con `SELECT ... FOR UPDATE` y verifica que esté habilitado para sacar turno (`AUTORIZADO`, `CREADO` con `Pago` vigente `anulado == False` y `estado in (EstadoPago.PAGADO, EstadoPago.PARCIAL)`, `REMUESTREO_REQUERIDO`, o `TURNO_SACADO` tras ausencia con `ausencias < 5` y sin turno activo pendiente).
 3. Verifica que el `Estudio` no tenga ya un `Turno` activo pendiente de asistencia (`activo == True` y `asistio is None`).
 4. Verifica que `centro_id` exista en `centros_extraccion`.
 5. Valida las reglas de negocio del horario `inicio`:
@@ -107,7 +107,7 @@
    - `inicio = inicio`
    - `activo = True`
    - `asistio = None`
-2. Actualiza `estudio.estado = EstadoEstudio.TURNO_SACADO` (`"Turno sacado"`).
+2. Si `estado_anterior != EstadoEstudio.TURNO_SACADO`, actualiza `estudio.estado = EstadoEstudio.TURNO_SACADO` (`"Turno sacado"`) y registra la transición en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `cambios = {"estado": {"anterior": estado_anterior, "nuevo": EstadoEstudio.TURNO_SACADO}}`).
 3. Ejecuta `session.flush()` para validar el índice único parcial `uq_turno_activo` (`centro_id`, `inicio` donde `activo = True`).
 **Timeout**: `3s`
 **Input**: `Estudio`, `CentroExtraccion`, `inicio`
@@ -302,3 +302,4 @@
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/turnos.py` y `estudios.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 1 y 6: habilitación con `Pago.estado in (PAGADO, PARCIAL)` (cuota #1 abonada en MercadoPago) y registro en `registro_modificaciones` al pasar a `TURNO_SACADO`. | Especificación actualizada (ver ADR-001 y ADR-003). |
