@@ -136,19 +136,20 @@ def dar_de_alta_paciente(
                 "nombre": datos["nombre"],
                 "apellido": datos["apellido"],
                 "edad": edad,
-                "diagnosticos": [{"nombre": patologia.nombre}],
+                "diagnosticos": [{"codigo": patologia.nombre.upper(), "nombre": patologia.nombre}],
             }
         ]
         for fam in familiares_input:
             parentesco_id = PARENTESCOS_POR_NOMBRE.get(fam["parentesco"].strip().lower(), 1)
-            personas.append(
-                {
-                    "parentesco": parentesco_id,
-                    "nombre": fam["nombre"],
-                    "apellido": datos["apellido"],
-                    "diagnosticos": [{"nombre": fam["diagnostico_previo"]}] if fam.get("diagnostico_previo") else [],
-                }
-            )
+            persona_fam: dict = {
+                "parentesco": parentesco_id,
+                "nombre": fam["nombre"],
+                "apellido": datos["apellido"],
+            }
+            if fam.get("diagnostico_previo"):
+                diag = fam["diagnostico_previo"].strip()
+                persona_fam["diagnosticos"] = [{"codigo": diag.upper()[:30], "nombre": diag}]
+            personas.append(persona_fam)
         try:
             resp_fam = cliente_fam.generar_familiograma(personas)
             base64_img = (resp_fam.get("imagen") or {}).get("base64")
@@ -158,7 +159,7 @@ def dar_de_alta_paciente(
                 familiograma_path = str(destino).replace("\\", "/")
         except ClienteError as exc:
             raise ErrorDominio(
-                "No se pudo generar el familiograma del paciente. Intente nuevamente.",
+                f"No se pudo generar el familiograma del paciente: {exc} | Detalle: {exc.respuesta}",
                 codigo="FAMILIOGRAMA_SERVICE_ERROR",
                 http_status=502,
                 reintentable=True,

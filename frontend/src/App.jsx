@@ -6,6 +6,8 @@ import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
+import PacientesMedicoPage from "./pages/PacientesMedicoPage";
+import AltaPacientePage from "./pages/AltaPacientePage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -78,6 +80,8 @@ export default function App() {
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
+          <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
+          <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}

@@ -5,7 +5,11 @@ import LogoAdn from "./LogoAdn";
 
 const MENU_POR_ROL = {
     paciente: [{ to: "/paciente/estudios", label: "Mis estudios" }],
-    medico: [{ to: "/medico/estudios", label: "Estudios" }],
+    medico: [
+        { to: "/medico/estudios", label: "Estudios" },
+        { to: "/medico/pacientes", label: "Pacientes" },
+        { to: "/medico/pacientes/nuevo", label: "Alta de paciente" },
+    ],
     gerente_medico: [{ to: "/gerencia/patologias", label: "Patologías" }],
     administrativo: [{ to: "/administracion/estudios", label: "Carga de datos ACTG" }],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],

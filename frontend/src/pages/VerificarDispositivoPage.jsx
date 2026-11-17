@@ -126,7 +126,7 @@ export default function VerificarDispositivoPage({ sesion, onSesion }) {
                             </div>
                         )}
 
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                        <form onSubmit={handleSubmit} noValidate className="space-y-4">
                             <div>
                                 <label htmlFor="codigo-2fa" className="mb-1.5 block text-xs font-medium text-slate-700">
                                     Código de verificación (6 dígitos)

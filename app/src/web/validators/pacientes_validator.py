@@ -16,7 +16,10 @@ class AltaPacienteSchema(Schema):
     class Meta:
         unknown = EXCLUDE
 
-    dni = fields.Str(required=True, validate=validate.Length(min=6, max=20))
+    dni = fields.Str(
+        required=True,
+        validate=validate.Regexp(r"^\d{7,10}$", error="El DNI debe tener entre 7 y 10 digitos numericos."),
+    )
     nombre = fields.Str(required=True, validate=validate.Length(min=1, max=100))
     apellido = fields.Str(required=True, validate=validate.Length(min=1, max=100))
     telefono = fields.Str(required=True, validate=validate.Length(min=1, max=30))
@@ -29,7 +32,12 @@ class AltaPacienteSchema(Schema):
         validate=validate.OneOf(["clinica", "familiar"]),
     )
     responsable_nombre = fields.Str(required=False, allow_none=True, load_default=None)
-    responsable_dni = fields.Str(required=False, allow_none=True, load_default=None)
+    responsable_dni = fields.Str(
+        required=False,
+        allow_none=True,
+        load_default=None,
+        validate=validate.Regexp(r"^\d{7,10}$", error="El DNI del responsable debe tener entre 7 y 10 digitos numericos."),
+    )
     sintomas_snomed_ids = fields.List(
         fields.Str(),
         required=True,

@@ -62,6 +62,11 @@ export default function CambiarPasswordInicialPage({ sesion, onSesion }) {
         e.preventDefault()
         setError("")
 
+        if (!passwordInicial || !nuevaPassword || !confirmacionPassword) {
+            setError("Completá todos los campos de contraseña.")
+            return
+        }
+
         if (nuevaPassword !== confirmacionPassword) {
             setError("La confirmacion no coincide con la nueva contrasena.")
             return
@@ -142,7 +147,7 @@ export default function CambiarPasswordInicialPage({ sesion, onSesion }) {
                                 {error}
                             </div>
                         )}
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                        <form onSubmit={handleSubmit} noValidate className="space-y-4">
                             <CampoPassword
                                 id="pwd-inicial"
                                 label="Contraseña inicial"

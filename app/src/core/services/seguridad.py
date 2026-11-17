@@ -60,18 +60,17 @@ _REGEX_LETRA = re.compile(r"[A-Za-z]")
 _REGEX_DIGITO = re.compile(r"\d")
 
 def validar_politica_password(password: str, codigo: str = "NUEVA_PASSWORD_INVALIDA") -> None:
-    if len(password) < 8 or len(password) > 128:
+    if len(password) < 8 or not _REGEX_LETRA.search(password) or not _REGEX_DIGITO.search(password):
         raise ErrorDominio(
-            "La contrasena debe tener entre 8 y 128 caracteres.",
+            "La contraseña debe tener como mínimo 8 caracteres, al menos una letra y un número.",
             codigo=codigo,
-            http_status=400
+            http_status=400,
         )
-    
-    if not _REGEX_LETRA.search(password) or not _REGEX_DIGITO.search(password):
+    if len(password) > 128:
         raise ErrorDominio(
-            "La contrasena debe incluir al menos una letra y un numero.",
+            "La contraseña no puede superar los 128 caracteres.",
             codigo=codigo,
-            http_status=400
+            http_status=400,
         )
 
 def decodificar_token(token: str, secret_key:str) -> dict[str, Any]:
