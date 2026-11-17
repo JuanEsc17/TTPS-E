@@ -6,7 +6,7 @@ import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
-import cambiarPasswordPage from "./pages/CambiarPasswordPage";
+import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -82,6 +82,10 @@ export default function App() {
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}
+          <Route
+            path="/cambiar-password"
+            element={<CambiarPasswordPage sesion={sesion} onSesion={manejarSesion} />}
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

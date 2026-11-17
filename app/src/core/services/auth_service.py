@@ -369,3 +369,75 @@ def reenviar_codigo_dispositivo(
     if usuario is None:
         raise ErrorDominio("Usuario inexistente.", codigo="TOKEN_INVALIDO_O_EXPIRADO", http_status=401)
     return _crear_y_enviar_desafio(usuario, dispositivo_hash, email_client)
+
+
+def cambiar_password(
+    *,
+    usuario_id: int,
+    password_actual: str,
+    password_nueva: str,
+    password_nueva_confirmacion: str,
+    token_payload: dict[str, Any],
+) -> dict[str, Any]:
+    """Actualiza voluntariamente la contrasena de un usuario autenticado y rota su sesion."""
+    logger.info("[auth_service] step=1_validar_input_cambio_password usuario_id=%s", usuario_id)
+    if password_nueva != password_nueva_confirmacion:
+        raise ErrorDominio(
+            "La confirmacion no coincide con la nueva contrasena.",
+            codigo="CONFIRMACION_NO_COINCIDE",
+            http_status=422,
+        )
+    validar_politica_password(password_nueva, codigo="PASSWORD_DEBIL", http_status=422)
+    if password_nueva == password_actual:
+        raise ErrorDominio(
+            "La nueva contrasena debe ser diferente de la actual.",
+            codigo="PASSWORD_IGUAL_A_ACTUAL",
+            http_status=422,
+        )
+
+    usuario = usuario_repo.buscar_por_id(usuario_id, for_update=True)
+    if usuario is None:
+        raise ErrorDominio("Usuario inexistente.", codigo="SESION_NO_VALIDA", http_status=404)
+    if usuario.debe_cambiar_password:
+        raise ErrorDominio(
+            "Debe cambiar su contrasena inicial antes de operar.",
+            codigo="DEBE_CAMBIAR_PASSWORD_INICIAL",
+            http_status=403,
+        )
+    if not verificar_password(usuario.password_hash, password_actual):
+        logger.info("[auth_service] step=2_verificacion_password_actual usuario_id=%s resultado=fallo", usuario_id)
+        raise ErrorDominio(
+            "La contrasena actual ingresada es incorrecta.",
+            codigo="PASSWORD_ACTUAL_INCORRECTA",
+            http_status=400,
+        )
+    logger.info("[auth_service] step=2_verificacion_password_actual usuario_id=%s resultado=ok", usuario_id)
+
+    usuario.password_hash = hashear_password(password_nueva)
+    usuario.debe_cambiar_password = False
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
+    # Rotar token despues del commit: si falla la BD el token previo sigue util para reintentar
+    if token_payload.get("jti") and token_payload.get("exp"):
+        tokens_revocados.revocar(str(token_payload["jti"]), float(token_payload["exp"]))
+    nuevo_token = emitir_token(
+        str(current_app.config["SECRET_KEY"]),
+        usuario_id=usuario.id,
+        rol=usuario.rol.value,
+        scope=SCOPE_ACCESO_COMPLETO,
+        ttl_segundos=8 * 3600,
+        dispositivo_hash=token_payload.get("dispositivo_hash"),
+    )
+    logger.info("[auth_service] step=3_password_actualizada_ok usuario_id=%s rol=%s", usuario.id, usuario.rol.value)
+    return {
+        "usuario_id": usuario.id,
+        "mensaje": "Tu contrasena ha sido actualizada correctamente.",
+        "updated_at": usuario.updated_at.isoformat() if usuario.updated_at else None,
+        "access_token": nuevo_token,
+        "ruta_inicio": RUTA_INICIO_POR_ROL[usuario.rol],
+        "usuario": _serializar_usuario(usuario),
+    }

@@ -34,7 +34,7 @@ function CampoPassword({ id, label, value, onChange, autoComplete, placeholder }
     )
 }
 
-export default function cambiarPasswordPage({ sesion, onSesion }) {
+export default function CambiarPasswordPage({ sesion, onSesion }) {
     const [passwordActual, setPasswordActual] = useState("")
     const [passwordNueva, setPasswordNueva] = useState("")
     const [confirmacion, setConfirmacion] = useState("")
