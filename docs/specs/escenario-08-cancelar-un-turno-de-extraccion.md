@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 8 – Cancelar un turno de extracción
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-8`
 
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Paciente`, `Médico` *(explícitamente prohibido en el LEL: "El médico no puede cancelar un turno")* |
-| **Objetos** | `Turno`, `Centro de extracción`, `Estudio`, `Aviso` |
-| **Verbos** | `Cancelar turno`, `Sacar turno` *(habilitado nuevamente tras cancelar)* |
+| **Objetos** | `Turno`, `Centro de extracción`, `Estudio`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Cancelar turno`, `Sacar turno` *(habilitado nuevamente tras cancelar)*, `Registrar modificación` |
 | **Estados** | `Turno sacado`, `Autorizado`, `Creado`, `Remuestreo requerido` |
 
 ---
@@ -91,8 +91,9 @@ El `Paciente` visualiza su `Turno` vigente en la plataforma y presiona `"Cancela
 2. Determina el estado habilitado al que retorna el `Estudio` para que el `Paciente` pueda solicitar un nuevo `Turno`:
    - Si el `Estudio` tiene alguna `Muestra` previa descartada (`any(m.motivo_descarte is not None for m in estudio.muestras)` y ninguna muestra vigente) -> `estudio.estado = EstadoEstudio.REMUESTREO_REQUERIDO` (`"Remuestreo requerido"`).
    - De lo contrario, si el `Estudio` tiene una `Autorizacion` con `resultado == ResultadoAutorizacion.AUTORIZADA` -> `estudio.estado = EstadoEstudio.AUTORIZADO` (`"Autorizado"`).
-   - De lo contrario (estudio con pago particular vigente en `pagos`) -> `estudio.estado = EstadoEstudio.CREADO` (`"Creado"`).
-3. Inserta un `Aviso` en `avisos` para el `Paciente` (`"Su turno del <inicio> fue cancelado. Ya puede solicitar un nuevo turno de extracción."`).
+   - De lo contrario (estudio con `Pago` particular vigente `anulado == False` y `estado in (EstadoPago.PAGADO, EstadoPago.PARCIAL)`) -> `estudio.estado = EstadoEstudio.CREADO` (`"Creado"`).
+3. Registra el cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = usuario_actual.id`, `cambios = {"estado": {"anterior": EstadoEstudio.TURNO_SACADO, "nuevo": estudio.estado}}`, `motivo = "Cancelación de turno de extracción"`).
+4. Inserta un `Aviso` en `avisos` para el `Paciente` (`"Su turno del <inicio> fue cancelado. Ya puede solicitar un nuevo turno de extracción."`).
 4. Ejecuta `session.commit()`.
 **Timeout**: `3s`
 **Input**: `Turno`, `Estudio`
@@ -226,3 +227,4 @@ El `Paciente` visualiza su `Turno` vigente en la plataforma y presiona `"Cancela
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/turnos.py` y `estudios.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 1 y 6: compatibilidad de retorno a `CREADO` para estudios con `Pago` en cuotas (`EstadoPago.PARCIAL` / `PAGADO`) y registro en `registro_modificaciones`. | Especificación actualizada (ver ADR-001 y ADR-003). |

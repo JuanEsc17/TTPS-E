@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 17 – Reanalizar un estudio
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-17-Reanalizar-un-estudio`
 
@@ -16,11 +16,15 @@
 | **Objeto** | `Datos crudos` | `DatosCrudos` en `datos_crudos` (exoma previamente obtenido de Corea) |
 | **Objeto** | `Gen` | `Gen` en `genes` y `AnalisisGen` en `analisis_genes` |
 | **Objeto** | `Variante` | `Variante` en `variantes` y `AnalisisVariante` en `analisis_variantes` |
-| **Objeto** | `Resultado` | `Resultado` en `resultados` (un `Resultado` por cada fila de `Analisis`) |
+| **Objeto** | `Resultado` | `Resultado` en `resultados` (`diagnostico`, `fecha_proximo_estudio`; un `Resultado` por cada fila de `Analisis`) |
+| **Objeto** | `VUS` | `ConclusionDiagnostica.VUS` y `Estudio.fecha_reevaluacion_vus` |
 | **Objeto** | `API de bioinformática` | Cliente HTTP en `app/src/clients/` |
+| **Objeto** | `Autorización de historia clínica` | `PacienteMedicoAutorizado` (`pacientes_medicos_autorizados`) |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` (`registro_modificaciones`) |
 | **Objeto** | `Aviso` | `Aviso` en `avisos` |
 | **Verbo** | `Reanalizar estudio` | Servicio `solicitar_reanalisis_estudio` (`TipoAnalisis.REANALISIS`) |
 | **Verbo** | `Cargar resultado` | Registro de variantes y generación del nuevo `Resultado` del reanálisis |
+| **Verbo** | `Registrar modificación` | Asiento atómico en `registro_modificaciones` |
 | **Estado** | `Resultado cargado` | `EstadoEstudio.RESULTADO_CARGADO` (`"Resultado cargado"`) |
 | **Estado** | `En análisis por bioinformática` | `EstadoEstudio.EN_ANALISIS_BIOINFORMATICA` (`"En analisis por bioinformatica"`) |
 | **Estado** | `En análisis de un bioinformático` | `EstadoEstudio.EN_ANALISIS_BIOINFORMATICO` (`"En analisis de un bioinformatico"`) |
@@ -75,7 +79,7 @@
 ### STEP 1: Validación de la solicitud de reanálisis y de los nuevos Genes
 **Actor**: `Médico` -> `router` -> `service` (`EstudioService.solicitar_reanalisis`) -> `clients` (`BioinformaticaClient`) -> `repo` (`EstudioRepo`, `GenRepo`)
 **Action**:
-1. Verifica que el usuario tenga `Rol.MEDICO` o `Rol.GERENTE_MEDICO` y que sea el médico tratante del `Paciente` / `Estudio`.
+1. Verifica que el usuario tenga `Rol.MEDICO` o `Rol.GERENTE_MEDICO` y que sea el médico tratante del `Estudio` (`estudio.medico.usuario_id == usuario.id`) o cuente con autorización activa en `pacientes_medicos_autorizados` (`activa == True`) para `estudio.paciente_id`.
 2. Bloquea la fila del `Estudio` (`SELECT ... FOR UPDATE`) y verifica que `estudio.estado == EstadoEstudio.RESULTADO_CARGADO` y que `estudio.datos_crudos IS NOT NULL`.
 3. Valida la lista de nuevos `Gen`es solicitados:
    - Debe contener al menos 1 `Gen`.
@@ -116,7 +120,7 @@
    - `created_at = now()`
 2. Inserta en `analisis_genes` los nuevos `Gen`es asociados a este nuevo `analisis.id`, y agrega en `estudios_genes` aquellos que no estuvieran ya vinculados al `Estudio` (con `OrigenGen.PATOLOGIA` o `OrigenGen.MANUAL` según corresponda).
 3. Si el médico indicó una `nueva_patologia_sospechada_id`, actualiza `estudio.patologia_sospechada_id`.
-4. Actualiza `estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICA`.
+4. Actualiza `estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICA` y registra la solicitud de reanálisis y cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = usuario.id`).
 5. Crea un `Aviso` y envía correo al equipo de `Bioinformático`s informando que el `Estudio` ingresó a `En análisis por bioinformática` para un `Reanálisis`.
 **Timeout**: 5s
 **Input**: `{ estudio_id: 42, medico_id: 4, nuevos_genes_ids: [11, 12] }`
@@ -160,8 +164,8 @@
 **Action**:
 1. El `Bioinformático` registra las `Variante`s encontradas en los nuevos `Gen`es para el `Analisis` de tipo `TipoAnalisis.REANALISIS` (`analisis_id = 39`).
 2. El sistema inserta las filas en `analisis_variantes` para `analisis_id = 39`.
-3. Calcula `calcular_positivo` sobre las variantes del reanálisis, genera el nuevo PDF (`storage/resultados/resultado_analisis_39.pdf`) e inserta una nueva fila en `resultados` (`analisis_id = 39`, `positivo`, `pdf_path`).
-4. Actualiza `estudio.estado = EstadoEstudio.RESULTADO_CARGADO`.
+3. Calcula `calcular_positivo` y `ConclusionDiagnostica` (`positivo`, `negativo`, `vus`) sobre las variantes del reanálisis, calcula `fecha_proximo_estudio` (+1 año si es `vus`), genera el nuevo PDF (`storage/resultados/resultado_analisis_39.pdf`) e inserta una nueva fila en `resultados` (`analisis_id = 39`, `positivo`, `diagnostico`, `fecha_proximo_estudio`, `pdf_path`).
+4. Actualiza `estudio.estado = EstadoEstudio.RESULTADO_CARGADO`, sincroniza `estudio.fecha_reevaluacion_vus = fecha_proximo_estudio` y registra la transición en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`).
 5. Envía `Aviso` y correo electrónico al `Médico` solicitante y al `Paciente` informando que el resultado del reanálisis está disponible.
 6. En el historial del `Estudio` (`estudio.analisis`, ordenado por `Analisis.id`) quedan registrados y accesibles tanto el `Analisis` inicial (`id = 25`) con su `Resultado` (`id = 18`) como el `Analisis` de reanálisis (`id = 39`) con su nuevo `Resultado` (`id = 24`).
 **Timeout**: 10s
@@ -318,6 +322,7 @@ Estudio (EstadoEstudio):
 |---|---|---|---|---|
 | RC-1 | En `app/src/core/models/analisis.py` (líneas 31-46), el modelo `Analisis` está diseñado específicamente para este escenario: tiene `tipo: Mapped[TipoAnalisis]` (`INICIAL` o `REANALISIS`), `solicitado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("medicos.id"))` y el docstring `"Un analisis del exoma. El reanalisis agrega una fila nueva sobre el mismo estudio (historial)"`. Además, `Estudio.analisis` está ordenado por `Analisis.id` (`estudios.py#L45`). | Low | Todos los pasos | Alineación 100% exacta con el diseño de `analisis.py` y `estudios.py`. |
 | RC-2 | Ni en `.ai/2-Glosario_LEL.md` (`Reanalizar estudio`) ni en `.ai/3-Escenarios.md` (Escenario 17) se incluye un nuevo flujo de presupuesto/turno/extracción para el reanálisis: el estudio salta directamente al análisis bioinformático reutilizando `estudio.datos_crudos`. | Low | STEP 2 | El estudio pasa directamente de `Resultado cargado` a `En análisis por bioinformática` creando la nueva fila en `analisis`. |
+| RC-3 | **[BRECHA DETECTADA]** La actualización de `fecha_reevaluacion_vus` al concluir un reanálisis, el permiso extendido por `pacientes_medicos_autorizados` y el registro en `registro_modificaciones` aún requieren migración/servicios (ADR-002/003/004). | Medium | STEP 1, STEP 2, STEP 4 | Integrar al implementar los módulos de auditoría, VUS y autorizaciones múltiples. |
 
 ---
 
@@ -349,3 +354,4 @@ Estudio (EstadoEstudio):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/analisis.py`, `estudios.py`, `clinica.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 2, 6 y 7 (ADR-002/003/004): permiso para médicos autorizados, auditoría de reanálisis en `registro_modificaciones` y recálculo de `ConclusionDiagnostica` / `fecha_reevaluacion_vus`. | Especificación actualizada y registrada brecha RC-3. |

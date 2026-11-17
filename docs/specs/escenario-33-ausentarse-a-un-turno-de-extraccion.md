@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 33 – Ausentarse a un turno de extracción
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-33`
@@ -12,7 +12,8 @@
 | **Sujetos** | **Paciente** | `Usuario` (`rol = Rol.PACIENTE`) + `Paciente` (`pacientes.id`) |
 | **Objetos** | **Turno** | Modelo `Turno` (tabla `turnos`: `id`, `centro_id`, `paciente_id`, `estudio_id`, `inicio`, `activo`, `asistio`) |
 | **Objetos** | **Estudio** | Modelo `Estudio` (tabla `estudios`: `id`, `estado`, `ausencias` con `CheckConstraint("ausencias BETWEEN 0 AND 5")`) y constante `MAX_AUSENCIAS = 5` en `reglas.py` |
-| **Objetos** | **Presupuesto** | Modelo `Presupuesto` (`presupuestos`) y modelo `Pago` (`pagos`: `id`, `presupuesto_id`, `anulado`) |
+| **Objetos** | **Presupuesto** | Modelo `Presupuesto` (`presupuestos`), `Pago` (`pagos`: `id`, `presupuesto_id`, `estado`, `anulado`) y `Cuota` (`cuotas`: `estado = ANULADA` si pierde el pago) |
+| **Objetos** | **Registro de modificaciones** | Modelo `RegistroModificacion` (`registro_modificaciones`: audita cambios en `Estudio.ausencias` y `Estudio.estado`) |
 | **Objetos** | **Centro de extracción** | Modelo `CentroExtraccion` (`centros_extraccion`) |
 | **Objetos** | **Bot de Telegram** | Canal por el cual el **centro de extracción** informa cuando sí se tomó la **muestra** (su ausencia al cierre del turno determina la inasistencia) |
 | **Objetos** | **Aviso** | Modelo `Aviso` (`avisos`: notificación en app y por mail al **paciente**) |
@@ -100,7 +101,7 @@
 **Actor**: Servicio de Turnos (`turno_service.py`) -> Repositorio (`turno_repo.py`)
 **Action**:
   1. Marca `turno.asistio = False` y `turno.activo = False` (liberando la restricción `uq_turno_activo` del slot).
-  2. Incrementa el contador: `estudio.ausencias = estudio.ausencias + 1`.
+  2. Incrementa el contador: `estudio.ausencias = estudio.ausencias + 1` y registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `origen = 'cron_sistema'`).
   3. Evalúa la condición de bifurcación contra `MAX_AUSENCIAS = 5`:
      - Si `estudio.ausencias < 5` (ausencias 1, 2, 3 o 4) -> GO TO **STEP 3A**.
      - Si `estudio.ausencias == 5` (quinta ausencia) -> GO TO **STEP 3B**.
@@ -148,8 +149,8 @@
 ### STEP 3B: Quinta ausencia (`ausencias == 5`) – Pérdida del pago y retorno a estado `Creado`
 **Actor**: Servicio de Turnos (`turno_service.py`) -> Repositorio (`turno_repo.py`, `economia_repo.py`) -> PostgreSQL
 **Action**:
-  1. Localiza el `Pago` activo (`anulado == False`) asociado al `Presupuesto` del `Estudio` y lo marca como `Pago.anulado = True` (el **paciente** pierde el pago).
-  2. Cambia el estado del `Estudio` a `EstadoEstudio.CREADO` (`estudio.estado = EstadoEstudio.CREADO`), manteniendo `estudio.ausencias = 5` como evidencia del límite alcanzado (nota: cuando el **paciente** realice el nuevo pago del **presupuesto**, el servicio de pagos reiniciará `estudio.ausencias = 0` para habilitar el nuevo ciclo de hasta 5 turnos respetando `CheckConstraint("ausencias BETWEEN 0 AND 5")`).
+  1. Localiza el `Pago` activo (`anulado == False`) asociado al `Presupuesto` del `Estudio` y lo marca como `Pago.anulado = True`, `Pago.estado = EstadoPago.ANULADO` (el **paciente** pierde el pago). Asimismo, marca todas las `Cuota`s no pagadas (`estado in (PENDIENTE, VENCIDA, RECHAZADA)`) de ese `Pago` con `estado = EstadoCuota.ANULADA`.
+  2. Cambia el estado del `Estudio` a `EstadoEstudio.CREADO` (`estudio.estado = EstadoEstudio.CREADO`), manteniendo `estudio.ausencias = 5` como evidencia del límite alcanzado y registrando el cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `cambios = {"estado": {"anterior": "Turno sacado", "nuevo": "Creado"}, "ausencias": {"anterior": 4, "nuevo": 5}}`, `motivo = "5ta ausencia a turno de extraccion"`). *(Nota: cuando el paciente realice el nuevo pago del presupuesto, el servicio de pagos reiniciará `estudio.ausencias = 0` para habilitar el nuevo ciclo de hasta 5 turnos).*
   3. Inserta un `Aviso` (`CanalAviso.APP` y `CanalAviso.MAIL`) para `estudio.paciente.usuario_id` informando que alcanzó las 5 ausencias máximas permitidas (`MAX_AUSENCIAS = 5`), por lo que perdió el pago abonado, su **estudio** volvió al estado **Creado** y debe **pagar presupuesto** nuevamente para poder sacar otro **turno**.
   4. Ejecuta `COMMIT`.
 **Timeout**: `3s`
@@ -311,3 +312,4 @@ Estudio (estudios.estado + estudios.ausencias) y Pago (pagos.anulado):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada verificando `Turno`, `Estudio`, `Pago` y `MAX_AUSENCIAS = 5` en `app/src/core/models/`. | Aprobada. |
+| 2026-11-17 | Actualizada con anulación de cuotas pendientes tras 5.ª ausencia (Req. 1) y auditoría en `registro_modificaciones` sobre `Estudio` (Req. 6). | Actualizada a v1.1. |

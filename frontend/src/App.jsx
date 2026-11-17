@@ -5,11 +5,16 @@ import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
+import RegistroMedicoPage from "./pages/RegistroMedicoPage";
+import PacientesMedicoPage from "./pages/PacientesMedicoPage";
+import AltaPacientePage from "./pages/AltaPacientePage";
+import CambiarPasswordPage from "./pages/CambiarPasswordPage";
+import ChatbotPage from "./pages/ChatbotPage";
+import PatologiasPage from "./pages/PatologiasPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
   { path: "/medico/estudios", titulo: "Estudios médicos" },
-  { path: "/gerencia/patologias", titulo: "Gestión de patologías" },
   { path: "/administracion/estudios", titulo: "Panel administrativo" },
   { path: "/bioinformatica/cola", titulo: "Cola de bioinformática" },
   { path: "/transporte/orden-del-dia", titulo: "Orden del día" },
@@ -66,6 +71,7 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage sesion={sesion} onSesion={manejarSesion} />} />
+        <Route path="/registro-medico" element={<RegistroMedicoPage sesion={sesion} />} />
         <Route
           path="/cambiar-password-inicial"
           element={<CambiarPasswordInicialPage sesion={sesion} onSesion={manejarSesion} />}
@@ -76,9 +82,23 @@ export default function App() {
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
+          <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
+          <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}
+          <Route
+            path="/cambiar-password"
+            element={<CambiarPasswordPage sesion={sesion} onSesion={manejarSesion} />}
+          />
+          <Route
+            path="/gerencia/patologias"
+            element={<PatologiasPage sesion={sesion} />}
+          />
+          <Route
+            path="/chatbot"
+            element={<ChatbotPage sesion={sesion} />}
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />

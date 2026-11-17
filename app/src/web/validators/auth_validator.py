@@ -68,3 +68,9 @@ class ReenviarCodigoSchema(Schema):
         if isinstance(data, dict) and isinstance(data.get("dispositivo_identificador"), str):
             return {**data, "dispositivo_identificador": data["dispositivo_identificador"].strip()}
         return data
+
+
+class CambiarPasswordSchema(Schema):
+    password_actual = fields.Str(required=True, validate=validate.Length(min=1))
+    password_nueva = fields.Str(required=True, validate=validate.Length(min=1))
+    password_nueva_confirmacion = fields.Str(required=True, validate=validate.Length(min=1))

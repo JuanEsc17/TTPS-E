@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 16 – Informar el resultado de un estudio
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-16-Informar-el-resultado-de-un-estudio`
 
@@ -13,12 +13,16 @@
 | **Sujeto** | `Paciente` | `Paciente` en `pacientes` / `Usuario` (`Rol.PACIENTE`) |
 | **Sujeto** | `Médico` | `Medico` en `medicos` / `Usuario` (`Rol.MEDICO`, `Rol.GERENTE_MEDICO`) |
 | **Objeto** | `Estudio` | `Estudio` en `estudios` |
-| **Objeto** | `Resultado` | `Resultado` en `resultados` (`positivo`, `pdf_path`, `generado_en`, `calcular_positivo`) |
+| **Objeto** | `Resultado` | `Resultado` en `resultados` (`positivo`, `diagnostico: ConclusionDiagnostica`, `fecha_proximo_estudio`, `pdf_path`, `generado_en`) y `Estudio.fecha_reevaluacion_vus` |
 | **Objeto** | `Variante` | `Variante` en `variantes` y `AnalisisVariante` en `analisis_variantes` |
-| **Objeto** | `VUS` | `ClasificacionVariante.VUS` (`"vus"`) |
+| **Objeto** | `VUS` | `ClasificacionVariante.VUS` (`"vus"`) y `ConclusionDiagnostica.VUS` (dispara seguimiento en 1 año, Escenario 43) |
+| **Objeto** | `Autorización de historia clínica` | `PacienteMedicoAutorizado` en `pacientes_medicos_autorizados` (habilita consulta de resultado por múltiples médicos autorizados) |
+| **Objeto** | `Vínculo de estudios familiares` | `EstudioFamiliarVinculado` en `estudios_familiares_vinculados` (habilita navegación médica desde estudio vinculado X') |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` *(auditoría de `Estudio`)* |
 | **Objeto** | `Aviso` | `Aviso` en `avisos` (`CanalAviso.APP`, `CanalAviso.MAIL`) |
 | **Verbo** | `Cargar resultado` | Servicio `cargar_resultado_estudio` |
 | **Verbo** | `Descargar resultado` | Endpoint `GET /api/estudios/{estudio_id}/resultado/pdf` |
+| **Verbo** | `Registrar modificación` | Asiento atómico en `registro_modificaciones` |
 | **Estado** | `En análisis de un bioinformático` | `EstadoEstudio.EN_ANALISIS_BIOINFORMATICO` (`"En analisis de un bioinformatico"`) |
 | **Estado** | `Resultado cargado` | `EstadoEstudio.RESULTADO_CARGADO` (`"Resultado cargado"`) |
 
@@ -73,18 +77,19 @@
 **Actor**: `service` (`ResultadoService.generar_resultado`) -> `clients` (`PdfGenerator`)
 **Action**:
 1. Obtiene la lista de objetos `Variante` asociados al `Analisis` (`[av.variante for av in analisis.variantes]`).
-2. Evalúa la función de dominio `calcular_positivo(variantes)` (`app/src/core/models/analisis.py#L81-L82`):
-   - `positivo = True` si `any(v.clasificacion == ClasificacionVariante.PATOGENICA for v in variantes)`.
-   - `positivo = False` si no hay variantes o todas las variantes encontradas son `BENIGNA`, `INOCUA` o `VUS`.
+2. Evalúa la función de dominio `calcular_positivo(variantes)` (`app/src/core/models/analisis.py#L81-L82`) junto con `calcular_conclusion_diagnostica(variantes, generado_en)` (ADR-004):
+   - Si existe al menos una variante `ClasificacionVariante.PATOGENICA`: `positivo = True`, `diagnostico = ConclusionDiagnostica.POSITIVO`, `fecha_proximo_estudio = None`.
+   - Si NO existe variante `PATOGENICA`, pero sí al menos una `ClasificacionVariante.VUS`: `positivo = False`, `diagnostico = ConclusionDiagnostica.VUS`, y calcula **`fecha_proximo_estudio = generado_en.date() + 1 año`** (Req. 7 / Escenario 43).
+   - En cualquier otro caso (`BENIGNA`, `INOCUA` o sin variantes): `positivo = False`, `diagnostico = ConclusionDiagnostica.NEGATIVO`, `fecha_proximo_estudio = None`.
 3. Compila el documento PDF del `Resultado` incluyendo:
    - Datos del `Paciente` (`nombre`, `apellido`, `dni`, `fecha_nacimiento`), del `Médico` derivante (`nombre`, `apellido`, `matricula`) y `Patología` sospechada.
    - Tipo de análisis (`inicial` o `reanalisis`) y lista de `Gen`es analizados (`simbolo`, `nombre`).
-   - Conclusión diagnóstica destacada: **POSITIVO** o **NEGATIVO**.
+   - Conclusión diagnóstica destacada: **POSITIVO**, **NEGATIVO** o **VUS (Variante de Significado Incierto)**; cuando `diagnostico == ConclusionDiagnostica.VUS`, incorpora de forma explícita la fecha programada de nuevo estudio dentro de un año (`"Recomendación de nuevo estudio / reevaluación VUS: <fecha_proximo_estudio>"`).
    - Tabla de `Variante`s encontradas (`gen.simbolo`, `notacion`, `clinvar_id`, `clasificacion`: `patogenica`, `benigna`, `inocua`, `vus`).
 4. Guarda el PDF en `storage/resultados/resultado_analisis_{analisis.id}.pdf`.
 **Timeout**: 8s
 **Input**: `{ estudio, analisis, variantes }`
-**Output on SUCCESS**: `{ positivo: true, pdf_path: "storage/resultados/resultado_analisis_25.pdf" }` -> GO TO STEP 2
+**Output on SUCCESS**: `{ positivo, diagnostico, fecha_proximo_estudio, pdf_path }` -> GO TO STEP 2
 **Output on FAILURE**:
   - `FAILURE(pdf_generation_error)`: Error de renderizado o de escritura en disco -> eliminar archivo PDF parcial (`ABORT_CLEANUP`) y abortar la transacción retornando HTTP `500 Internal Server Error` (`code: "ERROR_GENERACION_PDF_RESULTADO"`, `retryable: true`).
 
@@ -99,14 +104,15 @@
 ### STEP 2: Registro transaccional del Resultado y paso a `Resultado cargado`
 **Actor**: `service` -> `repo` (`ResultadoRepo`, `EstudioRepo`, `AvisoRepo`) -> `PostgreSQL`
 **Action**: En una única transacción atómica:
-1. Inserta el registro `Resultado` en la tabla `resultados`: `analisis_id = analisis.id`, `positivo = positivo`, `pdf_path = pdf_path`, `generado_en = now()`.
-2. Actualiza `estudio.estado = EstadoEstudio.RESULTADO_CARGADO` en la tabla `estudios`.
-3. Inserta los registros de `Aviso` en la tabla `avisos` (`leido = False`, `CanalAviso.APP` y `CanalAviso.MAIL`):
-   - Para el `Paciente` (`usuario_id = estudio.paciente.usuario_id`).
-   - Para el `Médico` tratante (`usuario_id = estudio.medico.usuario_id`).
+1. Inserta el registro `Resultado` en la tabla `resultados`: `analisis_id = analisis.id`, `positivo = positivo`, `diagnostico = diagnostico`, `fecha_proximo_estudio = fecha_proximo_estudio`, `pdf_path = pdf_path`, `generado_en = now()`.
+2. Actualiza `estudio.estado = EstadoEstudio.RESULTADO_CARGADO` en la tabla `estudios` y sincroniza `estudio.fecha_reevaluacion_vus = fecha_proximo_estudio` (`fecha + 1 año` si `diagnostico == 'vus'`, o `None` si el diagnóstico concluyó como `positivo`/`negativo`).
+3. Registra la modificación atómicamente en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = analisis.bioinformatico_id`, `cambios = {"estado": ..., "resultado_id": ..., "diagnostico": diagnostico.value, "fecha_reevaluacion_vus": str(fecha_proximo_estudio) if fecha_proximo_estudio else None}`).
+4. Inserta los registros de `Aviso` en la tabla `avisos` (`leido = False`, `CanalAviso.APP` y `CanalAviso.MAIL`):
+   - Para el `Paciente` (`usuario_id = estudio.paciente.usuario_id`), mencionando explícitamente la fecha del próximo estudio a un año si el diagnóstico fue `VUS` (Escenario 43).
+   - Para el `Médico` tratante (`usuario_id = estudio.medico.usuario_id`), incluyendo también el recordatorio anual si resultó `VUS`.
 **Timeout**: 5s
-**Input**: `{ analisis_id: 25, estudio_id: 42, positivo: true, pdf_path: "storage/resultados/resultado_analisis_25.pdf" }`
-**Output on SUCCESS**: `{ resultado_id: 18, estado_estudio: "Resultado cargado", avisos_ids: [501, 502] }` -> GO TO STEP 3
+**Input**: `{ analisis_id: 25, estudio_id: 42, positivo, diagnostico, fecha_proximo_estudio, pdf_path: "storage/resultados/resultado_analisis_25.pdf" }`
+**Output on SUCCESS**: `{ resultado_id: 18, estado_estudio: "Resultado cargado", diagnostico, fecha_proximo_estudio, avisos_ids: [501, 502] }` -> GO TO STEP 3
 **Output on FAILURE**:
   - `FAILURE(conflict)`: Ya existe un `Resultado` para ese `analisis_id` (`UniqueConstraint` en `resultados.analisis_id`) -> `ABORT_CLEANUP` y retornar HTTP `409 Conflict` (`code: "RESULTADO_YA_EXISTE_PARA_ANALISIS"`).
   - `FAILURE(database_error)`: Error al persistir en `PostgreSQL` -> `ABORT_CLEANUP` (rollback + borrar PDF creado en STEP 1).
@@ -147,7 +153,10 @@
 **Action**:
 1. Verifica que el usuario autenticado esté autorizado a ver el resultado de ese `Estudio`:
    - Si tiene `Rol.PACIENTE`, debe cumplirse `estudio.paciente.usuario_id == usuario.id`.
-   - Si tiene `Rol.MEDICO` o `Rol.GERENTE_MEDICO`, debe cumplirse `estudio.medico.usuario_id == usuario.id` (o haber solicitado un reanálisis en `estudio.analisis`).
+   - Si tiene `Rol.MEDICO` o `Rol.GERENTE_MEDICO`, debe cumplirse alguna de:
+     - `estudio.medico.usuario_id == usuario.id` (o haber solicitado un reanálisis en `estudio.analisis`), **o**
+     - contar con autorización activa en `pacientes_medicos_autorizados` (`activa == True`) para `estudio.paciente_id` (Escenario 40), **o**
+     - acceder desde un estudio origen `X` propio/autorizado conectado en `estudios_familiares_vinculados` (`(X, estudio.id)`, Escenario 41).
    - Si tiene `Rol.BIOINFORMATICO`, puede consultarlo por auditoría técnica.
    - Otros roles o terceros reciben HTTP `403 Forbidden` (protección estricta de datos genéticos sensibles).
 2. Verifica que `estudio.estado == EstadoEstudio.RESULTADO_CARGADO` y obtiene el último `Resultado` (o el historial completo de `Analisis` y sus respectivos `Resultado`s si hubo reanálisis).
@@ -188,8 +197,9 @@ Estudio (EstadoEstudio):
 
 Resultado (resultados):
 (inexistente)
-  -- (STEP 2: al menos 1 variante PATOGENICA) -----> [positivo = True, pdf_path = "..."]
-  -- (STEP 2: 0 variantes PATOGENICA) -------------> [positivo = False, pdf_path = "..."]
+  -- (STEP 2: >= 1 variante PATOGENICA) -------------------> [positivo = True, diagnostico = 'positivo', fecha_proximo_estudio = None]
+  -- (STEP 2: sin PATOGENICA, >= 1 VUS) -----------------> [positivo = False, diagnostico = 'vus', fecha_proximo_estudio = +1 año]
+  -- (STEP 2: sin PATOGENICA ni VUS) --------------------> [positivo = False, diagnostico = 'negativo', fecha_proximo_estudio = None]
 ```
 
 ---
@@ -205,11 +215,14 @@ Resultado (resultados):
   "ok": true,
   "estudio_id": 42,
   "estado_estudio": "Resultado cargado",
+  "fecha_reevaluacion_vus": null,
   "resultado_actual": {
     "resultado_id": 18,
     "analisis_id": 25,
     "tipo_analisis": "inicial",
     "positivo": true,
+    "diagnostico": "positivo",
+    "fecha_proximo_estudio": null,
     "generado_en": "2026-10-28T17:05:00",
     "pdf_url": "/api/estudios/42/resultado/pdf",
     "variantes": [
@@ -271,7 +284,8 @@ Resultado (resultados):
 | # | Finding | Severity | Spec section affected | Resolution |
 |---|---|---|---|---|
 | RC-1 | En `app/src/core/models/analisis.py` (líneas 68-82), el modelo `Resultado` y la función `calcular_positivo(variantes: list[Variante]) -> bool` ya están implementados y determinan que el estudio es positivo si alguna variante tiene `ClasificacionVariante.PATOGENICA`. | Low | STEP 1 | Se utiliza directamente `calcular_positivo(variantes)` del modelo de dominio. |
-| RC-2 | En `.ai/1-Entrevista.md` (línea 315), se enfatiza que la confidencialidad de los datos genéticos y variantes del paciente es crítica (`"si se filtran los datos genéticos de un paciente de una variante, le podría afectar al paciente. Nos podría hacer un juicio"`). | High | STEP 4 / Test Cases | Se incluyó control estricto de autorización por titularidad (`estudio.paciente.usuario_id` o `estudio.medico.usuario_id`) en la consulta y descarga del `Resultado`. |
+| RC-2 | En `.ai/1-Entrevista.md` (línea 315), se enfatiza que la confidencialidad de los datos genéticos y variantes del paciente es crítica (`"si se filtran los datos genéticos de un paciente de una variante, le podría afectar al paciente. Nos podría hacer un juicio"`). | High | STEP 4 / Test Cases | Se incluyó control estricto de autorización por titularidad, médicos autorizados en `pacientes_medicos_autorizados` y vínculos familiares verificados en `estudios_familiares_vinculados`. |
+| RC-3 | **[BRECHA DETECTADA]** En código actual (`enums.py`, `analisis.py`, `estudios.py`), `Resultado` todavía no incluye `diagnostico: ConclusionDiagnostica` ni `fecha_proximo_estudio`, `Estudio` no incluye `fecha_reevaluacion_vus` y falta invocar `AuditoriaService`. | High | STEP 1, STEP 2, Handoff | Incorporar columnas y lógica `VUS -> fecha + 1 año` junto con `AuditoriaService` conforme a ADR-003 y ADR-004. |
 
 ---
 
@@ -280,7 +294,8 @@ Resultado (resultados):
 | Test | Trigger | Expected behavior |
 |---|---|---|
 | `TC-01`: Resultado **positivo** cuando existe al menos una variante `patogenica` | El `Bioinformático` registra 1 variante `PATOGENICA` y 1 `VUS` | `calcular_positivo` devuelve `True`; se crea `Resultado(positivo=True)`, se genera el PDF, `estudio.estado == EstadoEstudio.RESULTADO_CARGADO` y se crean avisos para `Paciente` y `Médico`. |
-| `TC-02`: Resultado **negativo** cuando solo hay variantes `benigna`, `inocua` o `vus` (o ninguna) | El `Bioinformático` registra 1 variante `BENIGNA` y 1 `VUS` (sin variantes patogénicas) | `calcular_positivo` devuelve `False`; se crea `Resultado(positivo=False)` y `estudio.estado == EstadoEstudio.RESULTADO_CARGADO`. |
+| `TC-02`: Resultado **negativo** cuando solo hay variantes `benigna` o `inocua` (o ninguna) | El `Bioinformático` registra solo `BENIGNA`/`INOCUA` (sin `PATOGENICA` ni `VUS`) | `positivo=False`, `diagnostico=ConclusionDiagnostica.NEGATIVO`, `fecha_proximo_estudio=None`, `estudio.estado == EstadoEstudio.RESULTADO_CARGADO`. |
+| `TC-02b`: Resultado **VUS** calcula y guarda fecha para nuevo estudio dentro de 1 año | El `Bioinformático` registra al menos 1 variante `VUS` y 0 `PATOGENICA` | `positivo=False`, `diagnostico=ConclusionDiagnostica.VUS`, `resultado.fecha_proximo_estudio == hoy + 1 año` y `estudio.fecha_reevaluacion_vus == resultado.fecha_proximo_estudio`, con auditoría en `registro_modificaciones` y PDF con la fecha programada. |
 | `TC-03`: Notificación dual al `Paciente` y al `Médico` tratante | Finaliza la carga del `Resultado` | Se crean registros en `avisos` tanto para `estudio.paciente.usuario_id` como para `estudio.medico.usuario_id` y se despachan ambos correos electrónicos. |
 | `TC-04`: Descarga exitosa del PDF por el `Paciente` titular | `GET /api/estudios/42/resultado/pdf` autenticado como el `Paciente` dueño del estudio | HTTP `200 OK` con `Content-Type: application/pdf` y bytes válidos (`%PDF-`). |
 | `TC-05`: Descarga exitosa del PDF por el `Médico` tratante | `GET /api/estudios/42/resultado/pdf` autenticado como el `Médico` derivante del estudio | HTTP `200 OK` con `Content-Type: application/pdf`. |
@@ -304,3 +319,4 @@ Resultado (resultados):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/analisis.py`, `estudios.py`, `usuarios.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 2, 4, 6 y 7 (ADR-002/003/004): incorporada clasificación `ConclusionDiagnostica` (`positivo`, `negativo`, `vus`), guardado automático de `fecha_proximo_estudio` / `fecha_reevaluacion_vus` (+1 año si `VUS`), auditoría en `registro_modificaciones` y acceso de médicos autorizados o por vínculo familiar. | Especificación actualizada y brecha RC-3 registrada. |

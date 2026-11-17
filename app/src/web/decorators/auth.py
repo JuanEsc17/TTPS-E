@@ -19,6 +19,8 @@ from src.core.services.seguridad import (
 def requiere_sesion(
     roles: Rol | str | Iterable[Rol | str] | None = None, *,
     scopes_permitidos: tuple[str, ...] = (SCOPE_ACCESO_COMPLETO,),
+    codigo_rol_denegado: str = "ROL_NO_AUTORIZADO",
+    codigo_password_inicial: str = "DEBE_CAMBIAR_PASSWORD_INICIAL",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     roles_ok: set[str] | None = None
     if roles is not None:
@@ -56,7 +58,7 @@ def requiere_sesion(
                 if scope == SCOPE_CAMBIO_PASSWORD_INICIAL:
                     raise ErrorDominio(
                         "Debe cambiar su contrasena inicial antes de operar.",
-                        codigo="DEBE_CAMBIAR_PASSWORD_INICIAL",
+                        codigo=codigo_password_inicial,
                         http_status=403,
                     )
                 raise ErrorDominio(
@@ -80,14 +82,14 @@ def requiere_sesion(
             if SCOPE_ACCESO_COMPLETO in scopes_permitidos and usuario.debe_cambiar_password:
                 raise ErrorDominio(
                     "Debe cambiar su contrasena inicial antes de operar.",
-                    codigo="DEBE_CAMBIAR_PASSWORD_INICIAL",
+                    codigo=codigo_password_inicial,
                     http_status=403,
                 )
 
             if roles_ok is not None and usuario.rol.value not in roles_ok:
                 raise ErrorDominio(
                     "No tiene permisos suficientes para realizar esta accion.",
-                    codigo="ROL_NO_AUTORIZADO",
+                    codigo=codigo_rol_denegado,
                     http_status=403,
                 )
 

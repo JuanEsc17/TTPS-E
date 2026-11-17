@@ -20,6 +20,8 @@
 * El **administrativo** carga si la **obra social** autorizó o rechazó el **estudio**.  
 * El **administrativo** carga los **datos crudos** recibidos de Corea.  
 * El **administrativo** programa el **retiro** del **sample set** con **FedEx**.  
+* El **administrativo** ve las **cuotas** de los **pacientes** (pagadas, pendientes, vencidas y anuladas).  
+* El **administrativo** indica que se necesita **remuestrear** y retrocede el **estudio** a **Remuestreo requerido** cuando la **muestra** llega a Corea con baja calidad.  
 * El **administrativo** no puede darse de baja ni borrar su información.
 
 ## **Sujeto: Bioinformático**
@@ -63,6 +65,8 @@
 * El **médico** asigna **cupones** a los **pacientes**.  
 * El **médico** solicita el **reanálisis**.  
 * El **médico** recibe un mail cuando se carga el **resultado**.  
+* El **médico** autorizado por el **paciente** puede consultar su **historia clínica**.  
+* El **médico** puede ver desde un **estudio** de un **paciente** los **estudios** vinculados de sus **familiares** del **familiograma**.  
 * El sistema asume que la matrícula del **médico** es válida.  
 * El **médico** no puede cancelar un **turno** ni darse de baja.
 
@@ -73,11 +77,13 @@
 **Impacto:**
 
 * El **paciente** cambia la contraseña en su primer ingreso.  
-* El **paciente** paga el **presupuesto** o espera la autorización de la **obra social**.  
+* El **paciente** paga el **presupuesto** (en un solo pago o en **cuotas** mediante **MercadoPago**) o espera la autorización de la **obra social**.  
 * El **paciente** aplica un **cupón** al pagar.  
+* El **paciente** abona las **cuotas** pendientes de su plan de pagos con **MercadoPago**.  
+* El **paciente** puede agregar a varios **médicos** para autorizarlos a ver su **historia clínica** (y revocar la autorización).  
 * El **paciente** elige un **turno** en un **centro de extracción**.  
 * El **paciente** cancela el **turno**.  
-* El **paciente** pierde el pago si falta cinco veces a un **turno**.  
+* El **paciente** pierde el pago (y se anulan sus **cuotas** pendientes) si falta cinco veces a un **turno**.  
 * El **paciente** descarga el **resultado**.  
 * El **paciente** carga una **demanda** y su documentación si la **obra social** rechaza el **estudio**.  
 * El **paciente** consulta al **chatbot**.  
@@ -132,6 +138,15 @@
 
 * El sistema consulta la **API de obras sociales** para mostrar la cobertura al **paciente**.
 
+## **Objeto: API de MercadoPago**
+
+**Noción:** Pasarela de pagos externa (sinónimo: **MercadoPago**) que genera preferencias de cobro y notifica el resultado de pagos únicos o en **cuotas** mediante webhooks.
+
+**Impacto:**
+
+* El sistema crea preferencias de cobro en **MercadoPago** cuando el **paciente** inicia el pago del **presupuesto** o de una **cuota**.  
+* **MercadoPago** notifica al sistema la aprobación o rechazo del pago para habilitar **sacar turno** y actualizar el estado de la **cuota**.
+
 ## **Objeto: API de optimización de recorridos**
 
 **Noción:** Módulo externo posible que ordena el recorrido de la **orden del día**.
@@ -157,6 +172,25 @@
 
 * El sistema asocia la **autorización del Ministerio** a cada **estudio** del **sample set**.  
 * La **autorización del Ministerio** viaja con el **sample set** a Corea.
+
+## **Objeto: Autorización de historia clínica**
+
+**Noción:** Permiso explícito otorgado por el **paciente** a uno o varios **médicos** para consultar su **historia clínica**.
+
+**Impacto:**
+
+* El **paciente** agrega a varios **médicos** para autorizarlos a ver su **historia clínica**.  
+* El sistema valida esta autorización antes de permitir la lectura de la **historia clínica** a un **médico**.
+
+## **Objeto: Cuota**
+
+**Noción:** Cada una de las fracciones periódicas de pago de un **presupuesto** financiado en **cuotas** con **MercadoPago**, con número de cuota, monto, fecha de vencimiento y estado (`pendiente`, `pagada`, `vencida`, `rechazada`, `anulada`).
+
+**Impacto:**
+
+* El sistema genera las **cuotas** cuando el **paciente** opta por pago en **cuotas** vía **MercadoPago**.  
+* El **paciente** abona cada **cuota** pendiente mediante **MercadoPago**.  
+* El **administrativo** visualiza las **cuotas** de todos los **pacientes**.
 
 ## **Objeto: Aviso**
 
@@ -261,19 +295,21 @@
 **Impacto:**
 
 * El **médico** da de alta el **estudio**.  
-* El **estudio** pasa por distintos **estados** en un único circuito.  
+* El **estudio** pasa por distintos **estados** en un único circuito, pudiendo retroceder a **Remuestreo requerido** si la **muestra** llega a Corea con baja calidad.  
 * El **estudio** tiene un precio fijo de 500 dólares hasta 5 **genes** y 30 dólares por **gen** adicional.  
-* El **estudio** retrocede a **Remuestreo requerido** si la **muestra** es insuficiente.  
-* El sistema registra los mililitros del tubo.
+* El **estudio** guarda la fecha en que corresponde realizar un nuevo **estudio** dentro de un año cuando el diagnóstico es **VUS**.  
+* El **estudio** se vincula automáticamente con los **estudios** de **familiares** que figuren en el **familiograma**.  
+* Toda modificación sobre el **estudio** queda asentada en el **registro de modificaciones**.
 
 ## **Objeto: Familiar**
 
-**Noción:** Pariente del **paciente**, con parentesco, nombre, **síntomas** y diagnóstico previo, si lo hay.
+**Noción:** Pariente del **paciente**, con parentesco, nombre, apellido opcional, DNI opcional, **síntomas** y diagnóstico previo, si lo hay.
 
 **Impacto:**
 
 * El **médico** carga cada **familiar** del **paciente**.  
-* El sistema envía los **familiares** a la **API de familiograma**.
+* El sistema envía los **familiares** a la **API de familiograma**.  
+* Si el **familiar** se registra como **paciente** y se realiza un **estudio**, el sistema vincula automáticamente su **estudio** con los **estudios** del **paciente** original.
 
 ## **Objeto: Familiograma**
 
@@ -308,7 +344,9 @@
 
 **Impacto:**
 
-* El **médico** graba la **historia clínica** y el **transcriptor de audio** la convierte en texto.
+* El **médico** graba la **historia clínica** y el **transcriptor de audio** la convierte en texto.  
+* El **paciente** puede agregar a varios **médicos** con autorización para ver su **historia clínica**.  
+* Toda modificación sobre el **paciente** (incluida su **historia clínica**) queda asentada en el **registro de modificaciones**.
 
 ## **Objeto: Mapa de seguimiento**
 
@@ -327,7 +365,7 @@
 * El **paciente** entrega la **muestra** en el **centro de extracción**.  
 * El **transportista** traslada la **muestra** al **laboratorio central**.  
 * El sistema agrupa las **muestras** en **sample sets**.  
-* El sistema exige **remuestrear** si el tubo trae menos de 2 mililitros.
+* Si cuando llega la **muestra** a Corea tiene baja calidad (o no sirve para secuenciación), el **administrativo** indica que se necesita **remuestrear** y retrocede el **estudio**. (No existe descarte ni mínimo por muestra menor a 2 mililitros).
 
 ## **Objeto: Obra social**
 
@@ -376,13 +414,13 @@
 
 ## **Objeto: Presupuesto**
 
-**Noción:** Costo del **estudio**, que incluye la extracción, a pagar en un solo pago.
+**Noción:** Costo del **estudio**, que incluye la extracción, a pagar de forma particular (en un solo pago o en **cuotas** con **MercadoPago**) o cubierto por **obra social**.
 
 **Impacto:**
 
 * El **administrativo** emite el **presupuesto**.  
-* El **paciente** paga el **presupuesto** o lo cubre la **obra social**.  
-* El sistema registra el pago financieramente.
+* El **paciente** paga el **presupuesto** (en un pago o en **cuotas** vía **API de MercadoPago**) o lo cubre la **obra social**.  
+* El sistema registra el pago y sus **cuotas** financieramente.
 
 ## **Objeto: Recordatorio**
 
@@ -392,13 +430,22 @@
 
 * El sistema envía el **recordatorio** al **paciente** al **sacar turno**.
 
+## **Objeto: Registro de modificaciones**
+
+**Noción:** Historial inmutable (solo inserción) de todas las altas, modificaciones y transiciones realizadas sobre **sample sets**, **pacientes** y **estudios**.
+
+**Impacto:**
+
+* El sistema registra automáticamente el responsable (usuario o proceso del sistema), fecha y hora, entidad, cambios realizados y motivo cada vez que se crea o modifica un **sample set**, **paciente** o **estudio**.
+
 ## **Objeto: Resultado**
 
-**Noción:** PDF con la positividad o negatividad del **estudio** y las **variantes** del **paciente**.
+**Noción:** PDF con la conclusión diagnóstica (positividad, negatividad o **VUS**) del **estudio** y las **variantes** del **paciente**.
 
 **Impacto:**
 
 * El sistema notifica por mail al **médico** y al **paciente** al cargar el **resultado**.  
+* Si el diagnóstico es **VUS**, el sistema guarda la fecha en que corresponde realizar un nuevo **estudio** dentro de un año y la informa en el resultado.  
 * El **paciente** descarga el **resultado**.
 
 ## **Objeto: Sample set**
@@ -410,7 +457,8 @@
 * El sistema arma el **sample set** al llegar las **muestras**.  
 * El sistema cierra el **sample set** al completarse 10 **muestras** o al llegar un **Pompe urgente**.  
 * El **administrativo** programa el **retiro** del **sample set**.  
-* El sistema no admite más **muestras** una vez que el **sample set** se cierra.
+* El sistema no admite más **muestras** una vez que el **sample set** se cierra.  
+* Toda modificación sobre el **sample set** queda asentada en el **registro de modificaciones**.
 
 ## **Objeto: SNOMED**
 
@@ -473,13 +521,23 @@
 * El **bioinformático** selecciona la **variante** de la lista del **gen**.  
 * El diagnóstico es positivo si la **variante** es patogénica.
 
-## **Objeto: VUS**
+## **Objeto: Vínculo de estudios familiares**
 
-**Noción: Variante** de significado incierto, sin evidencia suficiente para clasificarla.
+**Noción:** Asociación bidireccional automática entre los **estudios** de un **paciente** y los **estudios** de un **familiar** presente en su **familiograma** que también se realiza un **estudio**.
 
 **Impacto:**
 
-* La **API de bioinformática** puede clasificar una **variante** como **VUS**.
+* El sistema vincula automáticamente ambos registros en la tabla de estudios vinculados al darse de alta el **estudio** o vincularse el **familiar**.  
+* El **médico** puede ver y navegar desde el **estudio** de un paciente hacia el **estudio** del familiar vinculado.
+
+## **Objeto: VUS**
+
+**Noción: Variante** de significado incierto, sin evidencia suficiente para clasificarla como patogénica o benigna.
+
+**Impacto:**
+
+* La **API de bioinformática** puede clasificar una **variante** como **VUS**.  
+* Si el diagnóstico del **estudio** resulta **VUS**, el sistema guarda la fecha para realizar un nuevo **estudio** dentro de un año (`fecha_resultado + 1 año`).
 
 # **VERBOS**
 
@@ -508,7 +566,8 @@
 **Impacto:**
 
 * El **bioinformático** carga las **variantes** en el **estudio**.  
-* El **estudio** pasa a **Resultado cargado**.  
+* El **estudio** pasa a **Resultado cargado** y se registra la modificación.  
+* Si el diagnóstico es **VUS**, el sistema guarda la fecha en que se debe realizar un nuevo **estudio** dentro de un año.  
 * El sistema notifica por mail al **médico** y al **paciente**.
 
 ## **Verbo: Dar de alta estudio**
@@ -541,13 +600,53 @@
 
 ## **Verbo: Pagar presupuesto**
 
-**Noción:** Abonar el **presupuesto** en un solo pago, simulado por ahora.
+**Noción:** Abonar el **presupuesto** en un solo pago o en **cuotas** mediante la **API de MercadoPago**.
 
 **Impacto:**
 
-* El **paciente** paga el **presupuesto** y puede aplicar un **cupón**.  
-* El sistema registra el pago.  
-* El **paciente** puede **sacar turno**.
+* El **paciente** elige cantidad de **cuotas** (1 o más), puede aplicar un **cupón** y abona mediante **MercadoPago**.  
+* El sistema registra el pago y sus **cuotas**, habilitando **sacar turno** tras la confirmación del pago único o primera **cuota**.
+
+## **Verbo: Pagar cuota**
+
+**Noción:** Abonar una **cuota** pendiente o vencida de un plan de pago mediante **MercadoPago**.
+
+**Impacto:**
+
+* El **paciente** genera la preferencia en **MercadoPago** para la **cuota** y el sistema actualiza el estado de la **cuota** a pagada al confirmarse el webhook.
+
+## **Verbo: Consultar cuotas**
+
+**Noción:** Visualizar las **cuotas** de los **pacientes**, sus vencimientos, estados y operaciones de **MercadoPago**.
+
+**Impacto:**
+
+* El **administrativo** consulta y filtra las **cuotas** de los **pacientes** para seguimiento de caja y deudas.
+
+## **Verbo: Autorizar médico a historia clínica**
+
+**Noción:** Otorgar o revocar permiso a uno o varios **médicos** para ver la **historia clínica** del **paciente**.
+
+**Impacto:**
+
+* El **paciente** agrega a varios **médicos** en su lista de autorizados y el sistema les habilita el acceso de lectura a su **historia clínica**.
+
+## **Verbo: Vincular estudios familiares**
+
+**Noción:** Asociar automáticamente el **estudio** de un **familiar** del **familiograma** con los **estudios** del **paciente** original y permitir su visualización cruzada por el **médico**.
+
+**Impacto:**
+
+* El sistema crea el **vínculo de estudios familiares** al registrarse el **estudio** del familiar.  
+* El **médico** accede desde el **estudio** de un paciente al **estudio** vinculado de su familiar.
+
+## **Verbo: Registrar modificación**
+
+**Noción:** Persistir de manera inmutable cada creación o cambio realizado sobre **sample sets**, **pacientes** o **estudios**.
+
+**Impacto:**
+
+* Toda operación de alta, actualización o cambio de estado sobre **sample sets**, **pacientes** o **estudios** genera una entrada en el **registro de modificaciones**.
 
 ## **Verbo: Reanalizar estudio**
 
@@ -560,12 +659,12 @@
 
 ## **Verbo: Remuestrear**
 
-**Noción:** Tomar una nueva **muestra** al **paciente** cuando la anterior no sirve, sin costo para él.
+**Noción:** Retroceder el **estudio** y tomar una nueva **muestra** al **paciente** cuando la muestra llega a Corea con baja calidad (u otro fallo de calidad, sin regla de menos de 2 mililitros), sin costo para él.
 
 **Impacto:**
 
-* El sistema notifica por mail al **médico** y al **paciente**.  
-* El **estudio** retrocede a **Remuestreo requerido**.  
+* El **administrativo** indica que se necesita un remuestreo y retrocede el **estudio** a **Remuestreo requerido**.  
+* El sistema notifica por mail al **médico** y al **paciente** y registra la modificación.  
 * El **paciente** saca un nuevo **turno** para el mismo **estudio**.
 
 ## **Verbo: Retirar sample set**
@@ -661,10 +760,10 @@
 
 **Impacto:**
 
-* El **paciente** paga el **presupuesto** y puede **sacar turno**.  
+* El **paciente** paga el **presupuesto** (pago único o primera **cuota** con **MercadoPago**) y puede **sacar turno**.  
 * El **estudio** pasa a **Turno sacado** cuando el **paciente** saca el **turno**.  
 * El **estudio** pasa a **Pendiente de autorización** si el **paciente** elige **obra social**.  
-* El **estudio** vuelve a **Creado** si el **paciente** falta cinco veces, y debe pagar de nuevo.
+* El **estudio** vuelve a **Creado** si el **paciente** falta cinco veces, pierde el pago (se anulan las **cuotas** pendientes) y debe pagar de nuevo.
 
 ## **Estado: En análisis de un bioinformático**
 
@@ -714,7 +813,8 @@
 
 **Impacto:**
 
-* El **administrativo** carga los **datos crudos** y el **estudio** pasa a **En análisis por bioinformática**.
+* El **administrativo** carga los **datos crudos** y el **estudio** pasa a **En análisis por bioinformática**.  
+* Si la **muestra** llega a Corea con baja calidad, el **administrativo** indica el remuestreo y retrocede el **estudio** a **Remuestreo requerido**.
 
 ## **Estado: Lista para retirar**
 
@@ -744,10 +844,11 @@
 
 ## **Estado: Remuestreo requerido**
 
-**Noción:** Situación del **estudio** cuya **muestra** no sirve (menos de 2 mililitros o ADN insuficiente).
+**Noción:** Situación del **estudio** cuya **muestra** llegó a Corea con baja calidad (o presenta ADN insuficiente / desnaturalizado; sin restricción de menos de 2 mililitros) y debió retroceder.
 
 **Impacto:**
 
+* El **administrativo** marca que se necesita un remuestreo y retrocede el **estudio** a este estado.  
 * El **paciente** saca un nuevo **turno** sin pagar de nuevo.  
 * El **estudio** pasa a **Turno sacado**.
 
@@ -757,7 +858,8 @@
 
 **Impacto:**
 
-* El sistema notifica por mail al **médico** y al **paciente**.
+* El sistema notifica por mail al **médico** y al **paciente**.  
+* Si el diagnóstico es **VUS**, el sistema guarda la fecha para realizar un nuevo **estudio** dentro de un año.
 
 ## **Estado: Turno sacado**
 
