@@ -22,8 +22,8 @@ from src.core.models import (
     Turno,
     Usuario,
 )
+from src.core.services.ausencia_service import AusenciaService
 from src.core.services.seguridad import SCOPE_ACCESO_COMPLETO, emitir_token
-from src.core.services.turno_service import TurnoService
 
 
 def _proximo_dia_habil_10am() -> datetime:
@@ -173,7 +173,7 @@ def test_primera_ausencia_notifica_por_mail_y_habilita_nuevo_turno(
     estudio = datos_ausencia["estudio"]
     pago = datos_ausencia["pago"]
 
-    resumen = TurnoService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
+    resumen = AusenciaService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
     assert resumen["total_detectados"] == 1
     assert resumen["total_procesados"] == 1
     assert resumen["errores"] == []
@@ -223,7 +223,7 @@ def test_cuarta_ausencia_mantiene_pago_y_estudio_listo_para_quinto_turno(
     session.commit()
 
     mock_email = MagicMock(spec=EmailClient)
-    resumen = TurnoService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
+    resumen = AusenciaService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
     assert resumen["total_procesados"] == 1
 
     data = resumen["procesados"][0]
@@ -251,7 +251,7 @@ def test_quinta_ausencia_anula_pago_y_vuelve_estudio_a_creado(
     session.commit()
 
     mock_email = MagicMock(spec=EmailClient)
-    resumen = TurnoService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
+    resumen = AusenciaService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
     assert resumen["total_procesados"] == 1
 
     data = resumen["procesados"][0]
@@ -286,7 +286,7 @@ def test_quinta_ausencia_obra_social_sin_pago_vuelve_a_creado_y_bloquea_turno(
     session.commit()
 
     mock_email = MagicMock(spec=EmailClient)
-    resumen = TurnoService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
+    resumen = AusenciaService.procesar_turnos_vencidos(ahora=datetime.now(), email_client=mock_email)
     assert resumen["total_procesados"] == 1
     data = resumen["procesados"][0]
     assert data["ausencias_acumuladas"] == 5
@@ -315,11 +315,11 @@ def test_no_registra_ausencia_si_existe_muestra_o_estudio_avanzo(
     estudio.estado = EstadoEstudio.LISTA_PARA_RETIRAR
     session.commit()
 
-    resumen = TurnoService.procesar_turnos_vencidos(ahora=datetime.now())
+    resumen = AusenciaService.procesar_turnos_vencidos(ahora=datetime.now())
     assert resumen["total_detectados"] == 0
     assert resumen["total_procesados"] == 0
 
-    _, _, status = TurnoService.registrar_ausencia(turno.id, ahora=datetime.now())
+    _, _, status = AusenciaService.registrar_ausencia(turno.id, ahora=datetime.now())
     assert status == 409
 
     session.refresh(estudio)
@@ -337,8 +337,8 @@ def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
     # Caso 1: Turno aun dentro de los 15 minutos -> no se detecta ni procesa
     turno_vencido.inicio = ahora - timedelta(minutes=10)
     session.commit()
-    assert TurnoService.procesar_turnos_vencidos(ahora=ahora)["total_detectados"] == 0
-    _, _, status_422 = TurnoService.registrar_ausencia(turno_vencido.id, ahora=ahora)
+    assert AusenciaService.procesar_turnos_vencidos(ahora=ahora)["total_detectados"] == 0
+    _, _, status_422 = AusenciaService.registrar_ausencia(turno_vencido.id, ahora=ahora)
     assert status_422 == 422
 
     # Caso 2: Exactamente al cumplirse los 15 min -> si falla EmailClient, revierte solo ese turno
@@ -369,7 +369,7 @@ def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
         {"id": "mail-ok", "estado": "pendiente"},
         ClienteConexionError("Timeout API Mail"),
     ]
-    resumen_fallo = TurnoService.procesar_turnos_vencidos(ahora=ahora, email_client=mock_email)
+    resumen_fallo = AusenciaService.procesar_turnos_vencidos(ahora=ahora, email_client=mock_email)
     assert resumen_fallo["total_detectados"] == 2
     assert resumen_fallo["total_procesados"] == 1
     assert len(resumen_fallo["errores"]) == 1
@@ -386,13 +386,13 @@ def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
 
     # Caso 3: Al recuperarse EmailClient, reprocesa turno_vencido y una 2da corrida no duplica
     mock_email_ok = MagicMock(spec=EmailClient)
-    resumen_reintento = TurnoService.procesar_turnos_vencidos(
+    resumen_reintento = AusenciaService.procesar_turnos_vencidos(
         ahora=ahora, email_client=mock_email_ok
     )
     assert resumen_reintento["total_detectados"] == 1
     assert resumen_reintento["total_procesados"] == 1
 
-    resumen_idempotente = TurnoService.procesar_turnos_vencidos(
+    resumen_idempotente = AusenciaService.procesar_turnos_vencidos(
         ahora=ahora, email_client=mock_email_ok
     )
     assert resumen_idempotente["total_detectados"] == 0
