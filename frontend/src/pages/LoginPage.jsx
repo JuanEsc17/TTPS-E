@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Navigate, Link, useNavigate } from "react-router-dom"
 import { loginRequest } from "../api/auth"
+import FondoAdn from "../components/FondoAdn";
 import LogoAdn from "../components/LogoAdn";
 
 export default function LoginPage({ sesion, onSesion }) {
@@ -45,15 +46,20 @@ export default function LoginPage({ sesion, onSesion }) {
     }
 
     return (
-        <div className="min-h-screen bg-[#F4F7FA] text-slate-900">
-            <header className="border-b border-slate-200 bg-white">
-                <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+        <div className="relative min-h-screen text-slate-900">
+            <FondoAdn />
+            <header className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 pt-6 sm:px-6">
+                <div className="rounded-2xl border border-white/70 bg-white/75 px-3.5 py-2 shadow-xs backdrop-blur-md">
                     <LogoAdn />
-                    <div className="hidden items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50/70 px-3 py-1 text-xs text-slate-600 sm:flex">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+                </div>
+                <div className="flex items-center gap-3">
+                    <span className="hidden items-center gap-1.5 rounded-full border border-cyan-200/80 bg-white/75 px-3 py-1.5 text-[11px] font-medium text-[#0B4F8A] shadow-xs backdrop-blur-md sm:inline-flex">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#0891B2]" aria-hidden="true" />
                         Circuito clínico protegido
-                    </div>
-                    <span className="text-xs font-medium text-slate-500">Acceso al sistema</span>
+                    </span>
+                    <span className="rounded-full border border-white/70 bg-white/75 px-3.5 py-1.5 text-xs font-semibold text-slate-600 shadow-xs backdrop-blur-md">
+                        Acceso al sistema
+                    </span>
                 </div>
             </header>
             <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
@@ -71,8 +77,10 @@ export default function LoginPage({ sesion, onSesion }) {
                 <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
                     <section
                         aria-label="Formulario de ingreso"
-                        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs lg:col-span-7"
+                        className="overflow-hidden rounded-2xl border border-white/80 bg-gradient-to-br from-white/85 via-white/75 to-[#EAF3FA]/80 shadow-lg shadow-[#0B4F8A]/10 backdrop-blur-md lg:col-span-7"
                     >
+                        <div className="h-1.5 w-full bg-gradient-to-r from-[#062846] via-[#0B4F8A] to-[#0891B2]" />
+                        <div className="p-6">
                         <div className="mb-5 border-b border-slate-100 pb-4">
                             <h2 className="text-sm font-semibold text-slate-900">Credenciales de acceso</h2>
                             <p className="text-xs text-slate-500">
@@ -147,31 +155,32 @@ export default function LoginPage({ sesion, onSesion }) {
                                 </Link>
                             </p>
                         </form>
+                        </div>
                     </section>
                     <aside
                         aria-label="Información de acceso seguro"
-                        className="rounded-2xl border border-slate-200 bg-white p-6 shadow-xs lg:col-span-5"
+                        className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-[#062846] via-[#0B4F8A] to-[#0E7490] p-6 text-white shadow-lg shadow-[#062846]/15 lg:col-span-5"
                     >
-                        <h2 className="text-sm font-semibold text-slate-900">Primer acceso y resguardo</h2>
-                        <p className="mt-1 text-xs text-slate-500">
+                        <h2 className="text-base font-semibold text-white">Primer acceso y resguardo</h2>
+                        <p className="mt-1 text-xs text-cyan-100/85">
                             Controles automáticos al ingresar al sistema
                         </p>
-                        <ul className="mt-5 space-y-4 text-xs text-slate-600">
-                            <li className="rounded-xl border border-slate-100 bg-[#F8FAFC] p-3">
-                                <p className="font-semibold text-slate-800">Contraseña inicial</p>
-                                <p className="mt-0.5 leading-relaxed">
+                        <ul className="mt-5 space-y-4 text-xs">
+                            <li className="rounded-xl border border-white/15 bg-white/10 p-3.5 backdrop-blur-xs">
+                                <p className="font-semibold text-white">Contraseña inicial</p>
+                                <p className="mt-0.5 leading-relaxed text-cyan-100/90">
                                     Si es tu primer ingreso como paciente, el sistema te pedirá definir una clave propia antes de operar.
                                 </p>
                             </li>
-                            <li className="rounded-xl border border-slate-100 bg-[#F8FAFC] p-3">
-                                <p className="font-semibold text-slate-800">Verificación de equipo nuevo</p>
-                                <p className="mt-0.5 leading-relaxed">
+                            <li className="rounded-xl border border-white/15 bg-white/10 p-3.5 backdrop-blur-xs">
+                                <p className="font-semibold text-white">Verificación de equipo nuevo</p>
+                                <p className="mt-0.5 leading-relaxed text-cyan-100/90">
                                     Si accedés desde una máquina no registrada, enviaremos un código temporal a tu correo electrónico.
                                 </p>
                             </li>
-                            <li className="rounded-xl border border-slate-100 bg-[#F8FAFC] p-3">
-                                <p className="font-semibold text-slate-800">Sesión vinculada al rol</p>
-                                <p className="mt-0.5 leading-relaxed">
+                            <li className="rounded-xl border border-white/15 bg-white/10 p-3.5 backdrop-blur-xs">
+                                <p className="font-semibold text-white">Sesión vinculada al rol</p>
+                                <p className="mt-0.5 leading-relaxed text-cyan-100/90">
                                     Al validar el ingreso, se habilita únicamente el módulo correspondiente a tu perfil.
                                 </p>
                             </li>
