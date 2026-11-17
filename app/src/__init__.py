@@ -11,11 +11,13 @@ from .web.api.turnos import turnos_bp
 load_dotenv()
 
 from .web.api.auth import auth_bp
+from .web.api.chatbot import chatbot_bp
 from .web.api.logistica import logistica_bp
 from .web.api.medicos import medicos_bp
+from .web.api.pacientes import pacientes_bp
+from .web.api.patologias import patologias_bp
 from .web.api.snomed import snomed_bp
 from .web.handlers.errors import registrar_manejadores_errores
-from .web.api.pacientes import pacientes_bp
 
 
 def _cargar_entorno(ruta_env: Path | None = None) -> None:
@@ -72,5 +74,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(medicos_bp)
     app.register_blueprint(snomed_bp)
     app.register_blueprint(pacientes_bp)
+    app.register_blueprint(patologias_bp)
+    app.register_blueprint(chatbot_bp)
 
     return app
