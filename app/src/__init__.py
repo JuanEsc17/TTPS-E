@@ -11,6 +11,7 @@ from .web.api.turnos import turnos_bp
 load_dotenv()
 
 from .web.api.auth import auth_bp
+from .web.api.logistica import logistica_bp
 from .web.handlers.errors import registrar_manejadores_errores
 
 
@@ -64,6 +65,7 @@ def create_app(config: dict | None = None) -> Flask:
     # Registrar blueprints
 
     app.register_blueprint(turnos_bp)
+    app.register_blueprint(logistica_bp)
 
     @app.cli.command("procesar-ausencias")
     def procesar_ausencias_cli() -> None:
