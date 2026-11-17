@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { reenviarCodigoRequest, verificarDispositivoRequest } from "../api/auth";
+import FondoAdn from "../components/FondoAdn";
 import LogoAdn from "../components/LogoAdn";
 
 export default function VerificarDispositivoPage({ sesion, onSesion }) {
@@ -57,19 +58,22 @@ export default function VerificarDispositivoPage({ sesion, onSesion }) {
     }
 
     return (
-        <div className="min-h-screen bg-[#F4F7FA] text-slate-900">
-            <header className="border-b border-slate-200 bg-white">
-                <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+        <div className="relative min-h-screen text-slate-900">
+            <FondoAdn />
+            <header className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 pt-6 sm:px-6">
+                <div className="rounded-2xl border border-white/70 bg-white/75 px-3.5 py-2 shadow-xs backdrop-blur-md">
                     <LogoAdn />
-                    <div className="hidden items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50/70 px-3 py-1 text-xs text-slate-600 sm:flex">
-                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden="true" />
+                </div>
+                <div className="flex items-center gap-3">
+                    <span className="hidden items-center gap-1.5 rounded-full border border-cyan-200/80 bg-white/75 px-3 py-1.5 text-[11px] font-medium text-[#0B4F8A] shadow-xs backdrop-blur-md sm:inline-flex">
+                        <span className="h-1.5 w-1.5 rounded-full bg-[#0891B2]" aria-hidden="true" />
                         Circuito clínico protegido
-                    </div>
-                    <div className="text-right leading-tight">
+                    </span>
+                    <div className="rounded-full border border-white/70 bg-white/75 px-3.5 py-1 text-right leading-tight shadow-xs backdrop-blur-md">
                         <span className="block text-xs font-semibold text-slate-800">
                             {usuario?.rol || "Usuario"}
                         </span>
-                        <span className="block text-[11px] text-slate-500">Verificación 2FA</span>
+                        <span className="block text-[10px] text-slate-500">Verificación 2FA</span>
                     </div>
                 </div>
             </header>
