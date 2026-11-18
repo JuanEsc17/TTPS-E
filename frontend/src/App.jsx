@@ -18,9 +18,6 @@ import BioinformaticaPage from "./pages/BioinformaticaPage";
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
   { path: "/medico/estudios", titulo: "Estudios médicos" },
-  { path: "/administracion/estudios", titulo: "Panel administrativo" },
-  { path: "/bioinformatica/cola", titulo: "Cola de bioinformática" },
-  { path: "/transporte/orden-del-dia", titulo: "Orden del día" },
   { path: "/admin/dashboard", titulo: "Administración general" },
 ];
 
