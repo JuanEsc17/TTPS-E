@@ -6,8 +6,11 @@ import LoginPage from "./pages/LoginPage";
 import CambiarPasswordInicialPage from "./pages/CambiarPasswordInicialPage";
 import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
+import PacientesMedicoPage from "./pages/PacientesMedicoPage";
+import AltaPacientePage from "./pages/AltaPacientePage";
 import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 import ChatbotPage from "./pages/ChatbotPage";
+import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
 import PatologiasPage from "./pages/PatologiasPage";
 import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
@@ -15,6 +18,8 @@ import BioinformaticaPage from "./pages/BioinformaticaPage";
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
   { path: "/medico/estudios", titulo: "Estudios médicos" },
+  { path: "/administracion/estudios", titulo: "Panel administrativo" },
+  { path: "/bioinformatica/cola", titulo: "Cola de bioinformática" },
   { path: "/transporte/orden-del-dia", titulo: "Orden del día" },
   { path: "/admin/dashboard", titulo: "Administración general" },
 ];
@@ -80,6 +85,8 @@ export default function App() {
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
+          <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
+          <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}
@@ -102,6 +109,10 @@ export default function App() {
           <Route
             path="/chatbot"
             element={<ChatbotPage sesion={sesion} />}
+          />
+          <Route
+            path="/transporte/orden-del-dia"
+            element={<OrdenDelDiaPage sesion={sesion} />}
           />
         </Route>
 

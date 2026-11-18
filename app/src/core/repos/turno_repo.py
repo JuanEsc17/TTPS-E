@@ -4,10 +4,12 @@ from __future__ import annotations
 from datetime import date, datetime, time
 
 from sqlalchemy import select
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import contains_eager, joinedload, selectinload
 from src.core.database import db
 from src.core.models.economia import Presupuesto
+from src.core.models.enums import EstadoEstudio
 from src.core.models.estudios import Estudio
+from src.core.models.logistica import Muestra
 from src.core.models.perfiles import Paciente
 from src.core.models.turnos import CentroExtraccion, Turno
 from src.core.models.usuarios import Aviso, CanalAviso
@@ -28,9 +30,24 @@ class TurnoRepo:
         return db.session.get(CentroExtraccion, centro_id)
 
     @staticmethod
-    def obtener_turno_por_id(turno_id: int) -> Turno | None:
-        """Busca un turno por su ID."""
-        return db.session.get(Turno, turno_id)
+    def obtener_turno_por_id(turno_id: int, bloquear: bool = False) -> Turno | None:
+        """Busca un turno por su ID cargando paciente y estudio con sus relaciones."""
+        stmt = (
+            select(Turno)
+            .join(Turno.estudio)
+            .options(
+                joinedload(Turno.paciente).joinedload(Paciente.usuario),
+                contains_eager(Turno.estudio).options(
+                    selectinload(Estudio.muestras),
+                    selectinload(Estudio.autorizaciones),
+                    selectinload(Estudio.presupuesto).selectinload(Presupuesto.pagos),
+                ),
+            )
+            .where(Turno.id == turno_id)
+        )
+        if bloquear:
+            stmt = stmt.with_for_update(of=[Turno, Estudio])
+        return db.session.execute(stmt).unique().scalars().first()
 
     @staticmethod
     def obtener_estudio_por_id(
@@ -82,6 +99,12 @@ class TurnoRepo:
         return list(db.session.execute(stmt).scalars().all())
 
     @staticmethod
+    def existe_muestra_por_turno(turno_id: int) -> bool:
+        """Verifica si ya existe una muestra registrada asociada a un turno."""
+        stmt = select(Muestra.id).where(Muestra.turno_id == turno_id).limit(1)
+        return db.session.execute(stmt).scalars().first() is not None
+
+    @staticmethod
     def crear_turno(
         centro_id: int,
         paciente_id: int,
@@ -103,6 +126,56 @@ class TurnoRepo:
         db.session.add(turno)
         db.session.flush()
         return turno
+
+    @staticmethod
+    def cancelar_turno(turno: Turno) -> Turno:
+        """Marca un turno como cancelado (activo=False) liberando el slot horario."""
+        turno.activo = False
+        db.session.flush()
+        return turno
+
+    @staticmethod
+    def registrar_ausencia_turno(turno: Turno) -> Turno:
+        """Marca un turno como ausente (asistio=False, activo=False) liberando el slot."""
+        turno.asistio = False
+        turno.activo = False
+        db.session.flush()
+        return turno
+
+    @staticmethod
+    def anular_pago_activo(estudio: Estudio) -> int | None:
+        """Anula los pagos vigentes del presupuesto del estudio y retorna el primer ID anulado."""
+        if not estudio.presupuesto:
+            return None
+
+        pago_anulado_id: int | None = None
+        for pago in estudio.presupuesto.pagos:
+            if not pago.anulado:
+                pago.anulado = True
+                if pago_anulado_id is None:
+                    pago_anulado_id = pago.id
+
+        if pago_anulado_id is not None:
+            db.session.flush()
+        return pago_anulado_id
+
+    @staticmethod
+    def listar_ids_turnos_vencidos_sin_procesar(fecha_limite_exclusiva: datetime) -> list[int]:
+        """Retorna IDs de turnos activos de jornadas finalizadas sin muestra ni asistencia."""
+        muestra_existente = select(Muestra.id).where(Muestra.turno_id == Turno.id).exists()
+        stmt = (
+            select(Turno.id)
+            .join(Turno.estudio)
+            .where(
+                Turno.activo.is_(True),
+                Turno.asistio.is_(None),
+                Turno.inicio < fecha_limite_exclusiva,
+                Estudio.estado == EstadoEstudio.TURNO_SACADO,
+                ~muestra_existente,
+            )
+            .order_by(Turno.inicio.asc(), Turno.id.asc())
+        )
+        return list(db.session.execute(stmt).scalars().all())
 
     @staticmethod
     def crear_aviso(

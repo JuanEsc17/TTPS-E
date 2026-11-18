@@ -32,26 +32,42 @@ class LogisticaService:
         return OptimizacionClient()
 
     @staticmethod
-    def _ordenar_centros_local(centros: list[CentroExtraccion]) -> list[CentroExtraccion]:
-        """Fallback deterministico por cercania al laboratorio central."""
-        lat0, lon0 = LAB_CENTRAL_COORDS["lat"], LAB_CENTRAL_COORDS["lon"]
-        return sorted(
-            centros,
-            key=lambda c: (math.hypot(c.latitud - lat0, c.longitud - lon0), c.id),
-        )
+    def _ordenar_centros_local(
+        centros: list[CentroExtraccion],
+        origen: dict[str, float] | None = None,
+    ) -> list[CentroExtraccion]:
+        """Fallback deterministico por vecino mas cercano desde la ubicacion de origen."""
+        actual = origen or LAB_CENTRAL_COORDS
+        lat_actual, lon_actual = actual["lat"], actual["lon"]
+        pendientes = list(centros)
+        ordenados: list[CentroExtraccion] = []
+        while pendientes:
+            siguiente = min(
+                pendientes,
+                key=lambda c: (
+                    math.hypot(c.latitud - lat_actual, c.longitud - lon_actual),
+                    c.id,
+                ),
+            )
+            ordenados.append(siguiente)
+            pendientes.remove(siguiente)
+            lat_actual, lon_actual = siguiente.latitud, siguiente.longitud
+        return ordenados
 
     @classmethod
     def _optimizar_centros(
         cls,
         centros: list[CentroExtraccion],
         optimizacion_client: Any | None = None,
+        origen: dict[str, float] | None = None,
     ) -> list[CentroExtraccion]:
         if len(centros) <= 1:
             return centros
 
+        punto_origen = origen or LAB_CENTRAL_COORDS
         cliente = cls._resolver_optimizacion_client(optimizacion_client)
         coordenadas = [
-            LAB_CENTRAL_COORDS,
+            punto_origen,
             *[{"lat": float(c.latitud), "lon": float(c.longitud)} for c in centros],
             LAB_CENTRAL_COORDS,
         ]
@@ -65,7 +81,7 @@ class LogisticaService:
                 continue
 
         if not recorrido:
-            return cls._ordenar_centros_local(centros)
+            return cls._ordenar_centros_local(centros, origen=punto_origen)
 
         # Mapea las coordenadas intermedias devueltas por OSRM a los centros reales
         pendientes = list(centros)
@@ -88,10 +104,24 @@ class LogisticaService:
 
     @staticmethod
     def _serializar_orden(orden: OrdenDelDia) -> dict[str, Any]:
+        ultima_pos = (
+            max(orden.posiciones, key=lambda pos: pos.id) if orden.posiciones else None
+        )
         return {
             "orden_id": orden.id,
             "transportista_id": orden.transportista_id,
             "fecha": orden.fecha.isoformat(),
+            "ubicacion_transportista": (
+                {
+                    "latitud": ultima_pos.latitud,
+                    "longitud": ultima_pos.longitud,
+                    "registrada_en": (
+                        ultima_pos.registrada_en.isoformat() if ultima_pos.registrada_en else None
+                    ),
+                }
+                if ultima_pos
+                else None
+            ),
             "paradas": [
                 {
                     "parada_id": p.id,
@@ -116,6 +146,9 @@ class LogisticaService:
         usuario_actual_id: int,
         fecha: date | None = None,
         optimizacion_client: Any | None = None,
+        origen_lat: float | None = None,
+        origen_lon: float | None = None,
+        recalcular: bool = False,
     ) -> tuple[dict[str, Any] | None, str | None, int]:
         transportista = LogisticaRepo.obtener_transportista_por_usuario(usuario_actual_id)
         if not transportista:
@@ -129,21 +162,63 @@ class LogisticaService:
                 400,
             )
 
+        origen = (
+            {"lat": float(origen_lat), "lon": float(origen_lon)}
+            if origen_lat is not None and origen_lon is not None
+            else None
+        )
+
         existente = LogisticaRepo.obtener_orden_del_dia(transportista.id, fecha_obj)
         if existente:
+            sin_recogidas = all(p.retirada_en is None for p in existente.paradas)
+            if recalcular and origen is not None and sin_recogidas:
+                centros_actuales = [p.centro for p in existente.paradas if p.centro is not None]
+                if not centros_actuales:
+                    centros_actuales = LogisticaRepo.listar_centros_con_muestras_listas(
+                        transportista.provincia
+                    )
+                if centros_actuales:
+                    centros_reordenados = cls._optimizar_centros(
+                        centros_actuales,
+                        optimizacion_client=optimizacion_client,
+                        origen=origen,
+                    )
+                    try:
+                        LogisticaRepo.reemplazar_paradas_orden(existente.id, centros_reordenados)
+                        LogisticaRepo.registrar_posicion(
+                            orden_id=existente.id,
+                            latitud=origen["lat"],
+                            longitud=origen["lon"],
+                        )
+                        LogisticaRepo.guardar_cambios()
+                        orden_actualizada = LogisticaRepo.obtener_orden_por_id(existente.id)
+                        return cls._serializar_orden(orden_actualizada or existente), None, 200
+                    except SQLAlchemyError as exc:
+                        LogisticaRepo.deshacer_cambios()
+                        return None, f"Error al recalcular la orden del dia: {exc!s}", 500
             return cls._serializar_orden(existente), None, 200
 
         centros = LogisticaRepo.listar_centros_con_muestras_listas(transportista.provincia)
         if not centros:
             return {"orden_del_dia": None, "paradas": []}, None, 200
 
-        centros_ordenados = cls._optimizar_centros(centros, optimizacion_client=optimizacion_client)
+        centros_ordenados = cls._optimizar_centros(
+            centros,
+            optimizacion_client=optimizacion_client,
+            origen=origen,
+        )
         try:
             orden = LogisticaRepo.crear_orden_del_dia(
                 transportista_id=transportista.id,
                 fecha=fecha_obj,
                 centros_ordenados=centros_ordenados,
             )
+            if origen is not None:
+                LogisticaRepo.registrar_posicion(
+                    orden_id=orden.id,
+                    latitud=origen["lat"],
+                    longitud=origen["lon"],
+                )
             LogisticaRepo.guardar_cambios()
         except IntegrityError:
             LogisticaRepo.deshacer_cambios()

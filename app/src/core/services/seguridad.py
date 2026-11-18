@@ -64,16 +64,15 @@ def validar_politica_password(
     codigo: str = "NUEVA_PASSWORD_INVALIDA",
     http_status: int = 400,
 ) -> None:
-    if len(password) < 8 or len(password) > 128:
+    if len(password) < 8 or not _REGEX_LETRA.search(password) or not _REGEX_DIGITO.search(password):
         raise ErrorDominio(
-            "La contrasena debe tener entre 8 y 128 caracteres.",
+            "La contraseña debe tener como mínimo 8 caracteres, al menos una letra y un número.",
             codigo=codigo,
             http_status=http_status,
         )
-
-    if not _REGEX_LETRA.search(password) or not _REGEX_DIGITO.search(password):
+    if len(password) > 128:
         raise ErrorDominio(
-            "La contrasena debe incluir al menos una letra y un numero.",
+            "La contraseña no puede superar los 128 caracteres.",
             codigo=codigo,
             http_status=http_status,
         )

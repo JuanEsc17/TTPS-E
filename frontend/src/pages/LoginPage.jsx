@@ -19,6 +19,14 @@ export default function LoginPage({ sesion, onSesion }) {
     async function handleSubmit(e) {
         e.preventDefault()
         setError("")
+        if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+            setError("Ingresá un correo electrónico válido.")
+            return
+        }
+        if (!password) {
+            setError("Ingresá tu contraseña.")
+            return
+        }
         setCargando(true)
         try {
             const data = await loginRequest({ email, password })
@@ -95,7 +103,7 @@ export default function LoginPage({ sesion, onSesion }) {
                                 {error}
                             </div>
                         )}
-                        <form onSubmit={handleSubmit} className="space-y-4">
+                        <form onSubmit={handleSubmit} noValidate className="space-y-4">
                             <div>
                                 <label htmlFor="login-email" className="mb-1.5 block text-xs font-medium text-slate-700">
                                     Correo electrónico

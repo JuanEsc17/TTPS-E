@@ -14,8 +14,25 @@ logistica_bp = Blueprint("logistica", __name__, url_prefix="/api/logistica")
 @logistica_bp.get("/ordenes-del-dia/hoy")
 @requiere_sesion(roles=[Rol.TRANSPORTISTA])
 def obtener_orden_del_dia_hoy() -> tuple[Any, int]:
+    lat_raw = request.args.get("lat")
+    lon_raw = request.args.get("lon")
+    origen_lat: float | None = None
+    origen_lon: float | None = None
+    if lat_raw is not None and lon_raw is not None:
+        try:
+            origen_lat = float(lat_raw)
+            origen_lon = float(lon_raw)
+        except ValueError:
+            return jsonify({"ok": False, "error": "Coordenadas de origen invalidas."}), 422
+
+    recalcular_raw = request.args.get("recalcular", "").strip().lower()
+    recalcular = recalcular_raw in ("1", "true", "si", "yes")
+
     resultado, error, status = LogisticaService.obtener_o_generar_orden_del_dia(
         usuario_actual_id=g.usuario_actual.id,
+        origen_lat=origen_lat,
+        origen_lon=origen_lon,
+        recalcular=recalcular,
     )
     if error:
         return jsonify({"ok": False, "error": error}), status
