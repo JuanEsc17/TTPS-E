@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from src.core.database import db
-from src.core.models import CodigoVerificacion, DispositivoConocido, Usuario
+from src.core.models import CodigoVerificacion, DispositivoConocido, Paciente, Usuario
 
 
 def ahora_utc():
@@ -53,6 +53,11 @@ def buscar_por_id(usuario_id: int, *, for_update: bool = False) -> Usuario | Non
     stmt = select(Usuario).where(Usuario.id == usuario_id)
     if for_update:
         stmt = stmt.with_for_update()
+    return db.session.scalar(stmt)
+
+
+def buscar_paciente_por_usuario_id(usuario_id: int) -> Paciente | None:
+    stmt = select(Paciente).where(Paciente.usuario_id == usuario_id)
     return db.session.scalar(stmt)
 
 def registrar_dispositivo(usuario_id: int, identificador_hash: str) -> DispositivoConocido:

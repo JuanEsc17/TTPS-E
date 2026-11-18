@@ -456,3 +456,63 @@ def test_rechazo_llegada_sin_paradas_recogidas(
     )
     assert resp.status_code == 409
     assert "SIN_MUESTRAS_EN_CAMINO" in resp.get_json()["error"]
+
+
+def test_orden_desde_ubicacion_actual_del_transportista(
+    app, client, session, monkeypatch, datos_logistica
+):
+    """TC-09: Si se informa ubicacion de origen del transportista, optimiza desde alli hacia Lab Central."""
+    _fijar_fecha_hoy(monkeypatch, date(2026, 11, 17))
+    mock_opt = MagicMock(spec=OptimizacionClient)
+    mock_opt.optimizar_recorrido.side_effect = ClienteServicioError("offline", codigo_http=503)
+    app.config["OPTIMIZACION_CLIENT"] = mock_opt
+    headers = _auth_header_para(app, datos_logistica["usuario_transp_ba"])
+
+    # Transportista ubicado en CABA Norte (cerca de centro_lejano, lejos de La Plata)
+    resp = client.get(
+        "/api/logistica/ordenes-del-dia/hoy?lat=-34.56&lon=-58.45",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()["data"]
+    assert data["ubicacion_transportista"]["latitud"] == pytest.approx(-34.56)
+    assert data["ubicacion_transportista"]["longitud"] == pytest.approx(-58.45)
+    assert [p["centro_id"] for p in data["paradas"]] == [
+        datos_logistica["centro_lejano"].id,
+        datos_logistica["centro_cercano"].id,
+    ]
+    coords_enviadas = mock_opt.optimizar_recorrido.call_args.args[0]
+    assert coords_enviadas[0] == {"lat": -34.56, "lon": -58.45}
+    assert coords_enviadas[-1]["lat"] == pytest.approx(-34.921577136619085)
+
+    # Al cambiar de ubicacion con recalcular=1 antes de retirar paradas, reordena desde el nuevo origen
+    resp_recalc = client.get(
+        "/api/logistica/ordenes-del-dia/hoy?lat=-34.91&lon=-57.95&recalcular=1",
+        headers=headers,
+    )
+    assert resp_recalc.status_code == 200
+    data_recalc = resp_recalc.get_json()["data"]
+    assert data_recalc["orden_id"] == data["orden_id"]
+    assert data_recalc["ubicacion_transportista"]["latitud"] == pytest.approx(-34.91)
+    assert [p["centro_id"] for p in data_recalc["paradas"]] == [
+        datos_logistica["centro_cercano"].id,
+        datos_logistica["centro_lejano"].id,
+    ]
+
+    # Una vez retirada la primera parada, recalcular=1 no altera el orden fijado
+    parada1 = data_recalc["paradas"][0]["parada_id"]
+    assert (
+        client.post(
+            f"/api/logistica/ordenes-del-dia/{data['orden_id']}/paradas/{parada1}/recoger",
+            headers=headers,
+        ).status_code
+        == 200
+    )
+    resp_bloqueado = client.get(
+        "/api/logistica/ordenes-del-dia/hoy?lat=-34.56&lon=-58.45&recalcular=1",
+        headers=headers,
+    )
+    assert [p["centro_id"] for p in resp_bloqueado.get_json()["data"]["paradas"]] == [
+        datos_logistica["centro_cercano"].id,
+        datos_logistica["centro_lejano"].id,
+    ]

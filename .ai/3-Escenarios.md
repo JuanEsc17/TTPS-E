@@ -10,7 +10,7 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 **Actores:** Paciente; Médico tratante.
 
-**Recursos:** DNI, datos personales, diagnóstico presuntivo, historia clínica, síntomas SNOMED, datos familiares y familiograma.
+**Recursos:** DNI, datos personales, diagnóstico presuntivo, historia clínica, síntomas SNOMED, datos familiares, familiograma, autorización inicial de historia clínica, registro de modificaciones.
 
 **Episodios:**
 
@@ -19,7 +19,7 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 3. El médico registra el diagnóstico presuntivo.  
 4. El médico registra los síntomas del paciente.  
 5. El sistema valida la correspondencia entre diagnóstico presuntivo y síntomas.  
-6. El sistema registra al paciente cuando la validación es correcta.
+6. El sistema registra al paciente cuando la validación es correcta, habilita la autorización inicial de lectura de su historia clínica para el médico tratante, vincula automáticamente si coincide con un familiar registrado previamente en un familiograma y asienta el alta en el registro de modificaciones.
 
 ## **Escenario 2: Dar de alta un estudio**
 
@@ -29,7 +29,7 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 **Actores:** Médico tratante; Paciente.
 
-**Recursos:** Datos del paciente, lista de genes, sospecha de patología, hallazgos secundarios.
+**Recursos:** Datos del paciente, lista de genes, sospecha de patología, hallazgos secundarios, vínculo de estudios familiares, registro de modificaciones.
 
 **Episodios:**
 
@@ -37,7 +37,7 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 2. El médico selecciona la lista de genes.  
 3. El sistema obtiene la lista de genes relacionada con la patología sospechada.  
 4. El médico agrega genes adicionales cuando corresponde.  
-5. El sistema registra el estudio.
+5. El sistema registra el estudio, vincula automáticamente el estudio con los estudios del paciente original si el paciente figura como familiar en un familiograma (y viceversa) y asienta el alta en el registro de modificaciones.
 
 ## **Escenario 3: Emitir un presupuesto**
 
@@ -92,20 +92,21 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 ## **Escenario 6: Pagar un estudio particular**
 
-**Objetivo:** Registrar el pago particular de un estudio.
+**Objetivo:** Registrar el pago particular de un estudio en un pago o en cuotas mediante MercadoPago.
 
-**Contexto:** El paciente realiza el estudio de forma particular.
+**Contexto:** El paciente realiza el estudio de forma particular y cuenta con su presupuesto emitido.
 
 **Actores:** Paciente.
 
-**Recursos:** Presupuesto, registro financiero, medio de pago simulado.
+**Recursos:** Presupuesto, registro financiero, API de MercadoPago, plan de cuotas, cupón opcional.
 
 **Episodios:**
 
-1. El paciente selecciona el pago particular.  
-2. El paciente completa el pago simulado.  
-3. El sistema registra el movimiento financiero.  
-4. El estudio queda habilitado para continuar.
+1. El paciente selecciona el pago particular y define si abonará en un solo pago o en cuotas (aplicando un cupón si posee uno vigente).  
+2. El sistema genera el plan de cuotas y crea la preferencia de cobro en MercadoPago.  
+3. El paciente completa el pago (pago único o primera cuota) en MercadoPago.  
+4. Al recibir la confirmación de MercadoPago, el sistema registra el movimiento financiero, marca la primera cuota como pagada (y consume el cupón si aplicó).  
+5. El estudio queda habilitado para continuar y sacar turno.
 
  
 
@@ -162,21 +163,21 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 ## **Escenario 10: Remuestrear un estudio**
 
-**Objetivo:** Obtener una nueva muestra cuando la muestra original no puede ser procesada.
+**Objetivo:** Retroceder el estudio y obtener una nueva muestra cuando la muestra enviada a Corea llega con baja calidad (u otra falla de calidad, sin regla de menos de 2 ml).
 
-**Contexto:** La muestra presenta ADN insuficiente o se encuentra desnaturalizada por una mala conservación.
+**Contexto:** La muestra llega a Corea con baja calidad (o presenta ADN insuficiente / desnaturalización por mala conservación). Se elimina la posibilidad de descarte por muestra menor a 2 ml.
 
-**Actores:** Paciente; Médico tratante; Personal administrativo.
+**Actores:** Personal administrativo; Paciente; Médico tratante.
 
-**Recursos:** Muestra, turno de extracción, estudio.
+**Recursos:** Muestra, estudio, turno de extracción, registro de modificaciones.
 
 **Episodios:**
 
-1. El laboratorio detecta que la muestra no puede ser procesada.  
-2. El paciente recibe la notificación de la necesidad de una nueva muestra.  
-3. El médico recibe la notificación correspondiente.  
-4. El paciente solicita un nuevo turno.  
-5. El paciente realiza una nueva extracción.
+1. El laboratorio recibe el reporte de que la muestra llegó a Corea con baja calidad y no puede ser procesada.  
+2. El personal administrativo indica en el sistema que se necesita un remuestreo y vuelve el estudio para atrás al estado Remuestreo requerido (sin costo adicional para el paciente), quedando asentado en el registro de modificaciones.  
+3. El paciente recibe la notificación de la necesidad de una nueva muestra.  
+4. El médico recibe la notificación correspondiente.  
+5. El paciente solicita un nuevo turno y realiza una nueva extracción.
 
 ## **Escenario 11: Transportar muestras al laboratorio central**
 
@@ -204,13 +205,13 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 **Actores:** 
 
-**Recursos:** Muestras, sample-set de muestras.
+**Recursos:** Muestras, sample-set de muestras, registro de modificaciones.
 
 **Episodios:**
 
 1. El sistema recibe las muestras del laboratorio central.  
 2. El sistema agrupa las muestras en conjuntos de diez.  
-3. El sistema crea el sample-set correspondiente.  
+3. El sistema crea o actualiza el sample-set correspondiente y asienta cada cambio en el registro de modificaciones.  
 4. El sistema mantiene el sample-set sin modificar una vez iniciado el siguiente estado.
 
 ## **Escenario 13: Enviar un sample-set de muestras a Corea**
@@ -270,17 +271,17 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 ## **Escenario 16: Informar el resultado de un estudio**
 
-**Objetivo:** Comunicar al paciente y al médico el resultado del estudio.
+**Objetivo:** Comunicar al paciente y al médico el resultado del estudio y registrar la fecha de próximo estudio dentro de un año si el diagnóstico es VUS.
 
 **Contexto:** El análisis bioinformático finalizó.
 
 **Actores:** Paciente; Médico tratante.
 
-**Recursos:** Resultado del exoma, variante genética, PDF del resultado, notificaciones.
+**Recursos:** Resultado del exoma, variante genética, PDF del resultado, fecha de reevaluación anual VUS, notificaciones, registro de modificaciones.
 
 **Episodios:**
 
-1. El sistema registra el resultado del estudio.  
+1. El sistema registra el resultado del estudio (y, si el diagnóstico es VUS, guarda la fecha para realizar un nuevo estudio dentro de un año).  
 2. El sistema genera el resultado en formato PDF.  
 3. El sistema notifica al paciente.  
 4. El sistema notifica al médico tratante.  
@@ -294,14 +295,14 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 **Actores:** Médico tratante; Bioinformático; Paciente.
 
-**Recursos:** Exoma existente, nuevos genes, historial de estudios.
+**Recursos:** Exoma existente, nuevos genes, historial de estudios, registro de modificaciones.
 
 **Episodios:**
 
-1. El médico solicita una reanálisis del estudio.  
+1. El médico solicita un reanálisis del estudio.  
 2. El médico indica los nuevos genes a analizar.  
 3. El bioinformático analiza los datos existentes.  
-4. El sistema registra el nuevo análisis en el historial del paciente.
+4. El sistema registra el nuevo análisis en el historial del paciente y asienta la modificación del estudio en el registro de modificaciones.
 
 ## **Escenario 18: Gestionar la información familiar**
 
@@ -311,14 +312,14 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 **Actores:** Médico tratante; Paciente.
 
-**Recursos:** Datos de familiares, relación, síntomas, diagnóstico, familiograma.
+**Recursos:** Datos de familiares (incluyendo DNI opcional para vinculación), relación, síntomas, diagnóstico, familiograma, registro de modificaciones.
 
 **Episodios:**
 
-1. El médico registra los familiares del paciente.  
+1. El médico registra los familiares del paciente (con su DNI si está disponible).  
 2. El médico registra la relación con cada familiar.  
 3. El médico registra los síntomas de los familiares.  
-4. El sistema asocia el familiograma al paciente.
+4. El sistema asocia el familiograma al paciente, vincula automáticamente si algún familiar coincide con un paciente con estudios existentes y registra la modificación en el registro de modificaciones.
 
 ## **Escenario 19: Registrar un paciente sin información familiar**
 
@@ -509,21 +510,21 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 ## **Escenario 30: Asignar y aplicar un cupón** 
 
-**Objetivo:** Entregar un cupón a un paciente y que este lo utilice al pagar su estudio. 
+**Objetivo:** Entregar un cupón a un paciente y que este lo utilice al pagar su estudio (en un pago o en cuotas con MercadoPago). 
 
 **Contexto:** Existe un cupón creado y un paciente con un estudio pendiente de pago. 
 
 **Actores:** Médico tratante; Paciente. 
 
-**Recursos:** Cupón, paciente, presupuesto, API de cupones. 
+**Recursos:** Cupón, paciente, presupuesto, API de cupones, API de MercadoPago. 
 
 **Episodios:**
 
 1. El médico asigna el cupón al paciente.  
-2. El paciente aplica el cupón al pagar el presupuesto.  
+2. El paciente aplica el cupón al iniciar el pago del presupuesto (en un solo pago o en cuotas con MercadoPago).  
 3. El sistema consulta a la API de cupones si el cupón está vigente.  
-4. El sistema aplica el descuento, que se acumula con la cobertura de la obra social.  
-5. El sistema avisa a la API de cupones que el cupón fue usado, para que venza.
+4. El sistema aplica el descuento, que se acumula con la cobertura de la obra social, antes de generar las cuotas y la preferencia de MercadoPago.  
+5. Al confirmarse el pago (o la primera cuota) desde MercadoPago, el sistema avisa a la API de cupones que el cupón fue usado, para que venza.
 
 ## **Escenario 31: Registrar un gerente médico** 
 
@@ -564,19 +565,19 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 **Objetivo:** Registrar la ausencia del paciente a un turno y aplicar el límite de cinco ausencias. 
 
-**Contexto:** El paciente pagó el estudio (o fue autorizado) y no concurre al turno que sacó. 
+**Contexto:** El paciente pagó el estudio (pago único, plan de cuotas con primera cuota abonada o autorizado por obra social) y no concurre al turno que sacó. 
 
 **Actores:** Paciente. 
 
-**Recursos:** Turno, contador de ausencias, estudio, pago. 
+**Recursos:** Turno, contador de ausencias, estudio, pago, cuotas, registro de modificaciones. 
 
 **Episodios:**
 
 1. El paciente no concurre al turno de extracción.  
 2. El sistema registra la ausencia.  
 3. El sistema permite al paciente sacar un nuevo turno, hasta la quinta ausencia.  
-4. Al llegar a la quinta ausencia, el sistema hace que el paciente pierda el pago.  
-5. El sistema devuelve el estudio al estado Creado, y el paciente debe pagar de nuevo.
+4. Al llegar a la quinta ausencia, el sistema hace que el paciente pierda el pago (anulando también las cuotas pendientes del ciclo).  
+5. El sistema devuelve el estudio al estado Creado, registra el cambio en el registro de modificaciones y el paciente debe pagar de nuevo.
 
 ## **Escenario 34: Cambiar la contraseña** 
 
@@ -597,25 +598,22 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 5. El sistema registra la nueva contraseña.  
 6. El usuario usa la nueva contraseña en los próximos ingresos.
 
-## **Escenario 35:Grabar la historia clínica**  
+## **Escenario 35: Grabar la historia clínica**  
 
-## **Objetivo:** Cargar la historia clínica del paciente dictándola en lugar de escribirla. 
+**Objetivo:** Cargar o actualizar la historia clínica del paciente dictándola en lugar de escribirla, dejando registro de modificaciones. 
 
-## **Contexto:** El médico está dando de alta a un paciente durante la consulta y prefiere grabar el resumen de su historia clínica. 
+**Contexto:** El médico está dando de alta a un paciente durante la consulta (o actualizando su resumen clínico como médico autorizado) y prefiere grabar el resumen de su historia clínica. 
 
-## **Actores:** Médico tratante. 
+**Actores:** Médico tratante; Médico autorizado. 
 
-## **Recursos:** Grabación de audio, transcriptor de audio, historia clínica**.** 
+**Recursos:** Grabación de audio, transcriptor de audio, historia clínica, autorización de historia clínica, registro de modificaciones. 
 
-## **Episodios:**
+**Episodios:**
 
-1. ## El médico graba la historia clínica del paciente.
-
-2. ## El sistema envía la grabación al transcriptor de audio.
-
-3. ## El transcriptor de audio convierte la grabación en texto.
-
-4. ## El sistema guarda el texto como historia clínica del paciente.
+1. El médico graba la historia clínica del paciente.  
+2. El sistema envía la grabación al transcriptor de audio.  
+3. El transcriptor de audio convierte la grabación en texto.  
+4. El sistema guarda el texto como historia clínica del paciente y asienta la modificación en el registro de modificaciones si el paciente ya estaba registrado.
 
 ## **Escenario 36: Cargar los síntomas del paciente con SNOMED** 
 
@@ -638,20 +636,123 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 ## **Escenario 37: Descargar el resultado de un estudio** 
 
-**Objetivo:** Que el paciente descargue el PDF con el resultado de su estudio y que el médico lo reciba. 
+**Objetivo:** Que el paciente descargue el PDF con el resultado de su estudio y que el médico lo reciba, incluyendo la fecha de próximo estudio si el diagnóstico es VUS y el acceso a estudios familiares vinculados. 
 
 **Contexto:** El bioinformático cargó las variantes y el estudio está en estado Resultado cargado. 
 
 **Actores:** Paciente; Médico tratante. 
 
-**Recursos:** Resultado en PDF, estudio, variantes del paciente, mail de aviso. 
+**Recursos:** Resultado en PDF, estudio, variantes del paciente, fecha de reevaluación VUS, vínculos de estudios familiares, mail de aviso. 
 
 **Episodios:**
 
-1. El sistema envía un mail al paciente y al médico avisando que el resultado está disponible.  
+1. El sistema envía un mail al paciente y al médico avisando que el resultado está disponible (informando la fecha de próximo estudio dentro de un año si es VUS).  
 2. El paciente ingresa al sistema.  
 3. El paciente selecciona el estudio.  
-4. El sistema muestra el resultado, que informa si fue positivo o negativo y las variantes del paciente.  
+4. El sistema muestra el resultado, que informa si fue positivo, negativo o VUS (junto con la fecha de próximo estudio a un año si aplica) y las variantes del paciente.  
 5. El paciente descarga el resultado en PDF.  
-6. El médico recibe el resultado.
+6. El médico recibe el resultado y puede consultar los estudios familiares vinculados desde el mismo estudio.
+
+## **Escenario 38: Pagar una cuota de un estudio con MercadoPago**
+
+**Objetivo:** Permitir al paciente abonar las cuotas subsiguientes de un estudio financiado en cuotas mediante MercadoPago.
+
+**Contexto:** El paciente optó por pagar el presupuesto de su estudio en cuotas mediante MercadoPago, ya abonó la primera cuota y tiene cuotas posteriores pendientes o vencidas.
+
+**Actores:** Paciente.
+
+**Recursos:** Plan de cuotas, cuota, presupuesto, API de MercadoPago, avisos.
+
+**Episodios:**
+
+1. El paciente consulta el detalle de cuotas pendientes o vencidas de su estudio.  
+2. El paciente selecciona la cuota a abonar y solicita el pago con MercadoPago.  
+3. El sistema genera la preferencia de pago en MercadoPago y redirige al checkout.  
+4. Al recibir la notificación webhook de MercadoPago con estado aprobado, el sistema marca la cuota como pagada y actualiza el estado del pago (a pagado si todas las cuotas quedaron saldadas).  
+5. Si una cuota supera su fecha de vencimiento sin pago, el sistema la marca como vencida y emite un aviso al paciente.
+
+## **Escenario 39: Consultar las cuotas de los pacientes**
+
+**Objetivo:** Permitir al administrativo visualizar y monitorear las cuotas de todos los pacientes.
+
+**Contexto:** Existen pacientes que eligieron pagar sus estudios en cuotas mediante MercadoPago y el laboratorio central requiere hacer seguimiento de cobros, vencimientos y deudas.
+
+**Actores:** Personal administrativo.
+
+**Recursos:** Cuotas, pagos, pacientes, estudios, referencias de MercadoPago.
+
+**Episodios:**
+
+1. El personal administrativo accede al panel de cuotas de pacientes.  
+2. El personal administrativo filtra opcionalmente por paciente, estudio, estado de cuota (pendiente, pagada, vencida, anulada) o rango de vencimiento.  
+3. El sistema muestra el listado de cuotas con monto, número de cuota sobre el total, fecha de vencimiento, estado actual e identificador de pago en MercadoPago.  
+4. El sistema muestra el resumen de totales cobrados, pendientes y vencidos por paciente o estudio.
+
+## **Escenario 40: Autorizar médicos para ver la historia clínica**
+
+**Objetivo:** Permitir que el paciente agregue a varios médicos con autorización para consultar su historia clínica y gestione dichos permisos.
+
+**Contexto:** El paciente desea que otros médicos además del médico que lo dio de alta puedan consultar su historia clínica en el sistema.
+
+**Actores:** Paciente; Médico.
+
+**Recursos:** Historia clínica, lista de médicos registrados, autorización de historia clínica, registro de modificaciones, avisos.
+
+**Episodios:**
+
+1. El paciente consulta el directorio de médicos registrados en el sistema.  
+2. El paciente selecciona uno o varios médicos y les otorga autorización para ver su historia clínica (pudiendo revocarla posteriormente).  
+3. El sistema registra la autorización activa, asienta el cambio en el registro de modificaciones del paciente y notifica al médico mediante un aviso.  
+4. El médico autorizado ingresa al sistema y consulta la historia clínica del paciente.
+
+## **Escenario 41: Vincular y consultar estudios de familiares del familiograma**
+
+**Objetivo:** Vincular automáticamente el estudio de un familiar presente en el familiograma con los estudios del paciente original y permitir al médico navegar entre ellos.
+
+**Contexto:** Un paciente original cuenta con familiares registrados en su familiograma, y uno de esos familiares se realiza un estudio en el laboratorio.
+
+**Actores:** Médico tratante; Paciente.
+
+**Recursos:** Familiograma, familiares, DNI del familiar, tabla de estudios, vínculo de estudios familiares, registro de modificaciones.
+
+**Episodios:**
+
+1. Al darse de alta un paciente o un estudio (o al actualizar familiares en el familiograma), el sistema identifica automáticamente coincidencias entre el familiar y un paciente con estudios (por DNI o vinculación directa).  
+2. El sistema crea automáticamente el vínculo bidireccional en la tabla de estudios vinculados asociando los estudios del familiar con los estudios del paciente original y asienta la modificación.  
+3. El médico abre el estudio de un paciente X y visualiza la sección de estudios familiares vinculados.  
+4. El médico accede desde el estudio de X a la información y resultado del estudio del familiar X' vinculado.
+
+## **Escenario 42: Consultar el registro de modificaciones**
+
+**Objetivo:** Consultar la trazabilidad completa e inmutable de todas las modificaciones realizadas sobre sample sets, pacientes y estudios.
+
+**Contexto:** El laboratorio requiere auditoría integral de quién modificó cada sample set, paciente o estudio, qué valores cambiaron, cuándo y por qué motivo.
+
+**Actores:** Personal administrativo; Gerente médico; Admin general; Médico (sobre sus pacientes o estudios autorizados).
+
+**Recursos:** Registro de modificaciones, sample set, paciente, estudio.
+
+**Episodios:**
+
+1. El usuario autorizado accede al historial de auditoría de un sample set, paciente o estudio (o al registro general filtrado).  
+2. El sistema verifica los permisos de visibilidad según el rol del usuario.  
+3. El sistema retorna la línea de tiempo cronológica e inmutable con fecha y hora, usuario responsable u origen automático, acción realizada, valores anteriores y nuevos, y motivo del cambio.
+
+## **Escenario 43: Programar y notificar seguimiento anual por diagnóstico VUS**
+
+**Objetivo:** Guardar y dar seguimiento a la fecha de nuevo estudio dentro de un año cuando el diagnóstico de un estudio es VUS.
+
+**Contexto:** Al cargar el resultado de un estudio, las variantes halladas determinan un diagnóstico VUS (sin variante patogénica confirmatoria), por lo que debe reevaluarse dentro de un año.
+
+**Actores:** Médico tratante; Paciente.
+
+**Recursos:** Resultado del estudio, clasificación VUS, fecha de reevaluación anual VUS, avisos, registro de modificaciones.
+
+**Episodios:**
+
+1. Al registrarse un resultado con diagnóstico VUS, el sistema calcula automáticamente la fecha a un año (`fecha_resultado + 1 año`) y la guarda tanto en el resultado como en el estudio.  
+2. El sistema asienta el guardado de la fecha de reevaluación en el registro de modificaciones del estudio.  
+3. El médico y el paciente visualizan la fecha programada para el próximo estudio en el detalle del estudio, en el PDF del resultado y en sus avisos.  
+4. Al acercarse o cumplirse la fecha programada al año, el sistema genera un aviso recordatorio para el médico y el paciente indicando que corresponde realizar el nuevo estudio o reevaluación.
+
 

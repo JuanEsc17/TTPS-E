@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 13 – Enviar un sample-set de muestras a Corea
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-13-Enviar-un-sample-set-de-muestras-a-corea`
 
@@ -18,8 +18,10 @@
 | **Objeto** | `API del Ministerio de Salud` | Cliente HTTP en `app/src/clients/` |
 | **Objeto** | `Autorización del Ministerio` | PDF recibido y referenciado en `SampleSet.autorizacion_ministerio_pdf_path` |
 | **Objeto** | `FedEx` | Módulo externo de retiro (`SampleSet.retiro_fedex_fecha`, `retiro_fedex_lugar`, `retiro_fedex_url`, `retiro_fedex_pedido_id`) |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` *(auditoría de `sample_set` y `estudio`)* |
 | **Objeto** | `Aviso` | `Aviso` en `avisos` |
 | **Verbo** | `Retirar sample set` | Servicio `programar_retiro_fedex` y webhook `confirmar_retiro_fedex` |
+| **Verbo** | `Registrar modificación` | Servicio `AuditoriaService.registrar_modificacion(...)` |
 | **Estado** | `En espera de retiro` | `EstadoEstudio.EN_ESPERA_RETIRO` (`"En espera de retiro"`) |
 | **Estado** | `En viaje a Corea` | `EstadoEstudio.EN_VIAJE_COREA` (`"En viaje a Corea"`) / `EstadoSampleSet.EN_VIAJE_COREA` (`"en_viaje_a_corea"`) |
 
@@ -79,7 +81,7 @@
 **Action**:
 1. Obtiene las `Muestra`s válidas del `SampleSet` junto con sus `Estudio`s, `Paciente`s y `Usuario`s asociados, ordenadas por `Muestra.id`.
 2. Genera un archivo CSV UTF-8 con encabezados `muestra_id,estudio_id,paciente_dni,paciente_nombre,paciente_apellido,fecha_nacimiento,patologia_sospechada`.
-3. Guarda el archivo en almacenamiento persistente (`storage/sample_sets/sample_set_{id}.csv`) y actualiza `sample_set.csv_path` en la tabla `sample_sets` (quedando vinculado a todos los `Estudio`s del lote a través de `estudio.muestra_vigente.sample_set.csv_path`).
+3. Guarda el archivo en almacenamiento persistente (`storage/sample_sets/sample_set_{id}.csv`), actualiza `sample_set.csv_path` en `sample_sets` (quedando vinculado a todos los `Estudio`s del lote vía `estudio.muestra_vigente.sample_set.csv_path`) y registra la modificación en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'modificacion'`, `origen = 'cron_sistema'`, `cambios = {"csv_path": {"anterior": None, "nuevo": csv_path}}`).
 **Timeout**: 5s
 **Input**: `{ sample_set_id: 12 }`
 **Output on SUCCESS**: `{ sample_set_id: 12, csv_path: "storage/sample_sets/sample_set_12.csv" }` -> GO TO STEP 2
@@ -100,7 +102,7 @@
 **Action**:
 1. Envía mediante petición HTTP `multipart/form-data` el archivo `CSV` generado en STEP 1 a la `API del Ministerio de Salud` sin requerir intervención del `Administrativo`.
 2. Recibe como respuesta el documento PDF de la `Autorización del Ministerio` (que certifica que la lista de pacientes autorizados coincide con los tubos del paquete para el control aduanero rumbo a Corea).
-3. Almacena el PDF en `storage/sample_sets/autorizacion_ministerio_{id}.pdf` y actualiza `sample_set.autorizacion_ministerio_pdf_path` en la tabla `sample_sets` (quedando asociado a todos los `Estudio`s del `SampleSet`).
+3. Almacena el PDF en `storage/sample_sets/autorizacion_ministerio_{id}.pdf`, actualiza `sample_set.autorizacion_ministerio_pdf_path` en `sample_sets` y registra la modificación en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'modificacion'`, `cambios = {"autorizacion_ministerio_pdf_path": {"anterior": None, "nuevo": pdf_path}}`).
 4. Registra un `Aviso` para los usuarios con `Rol.ADMINISTRATIVO` indicando que el `SampleSet` ya cuenta con `Autorización del Ministerio` y está listo para programar el retiro con `FedEx`.
 **Timeout**: 15s
 **Input**: `{ sample_set_id: 12, csv_path: "storage/sample_sets/sample_set_12.csv" }`
@@ -125,7 +127,7 @@
 3. Valida que la fecha y hora de retiro (`retiro_fedex_fecha`) caiga en día hábil (lunes a viernes, no feriado) dentro del horario de atención del laboratorio central (`09:00` a `18:00`).
 4. Construye la URL de callback (`retiro_fedex_url = "{BASE_URL}/api/webhooks/fedex/sample-sets/{sample_set_id}/retirado"`).
 5. Invoca la API del módulo externo de `FedEx` enviando `sample_set_id`, `fecha_hora_retiro`, `lugar_retiro` y `callback_url`.
-6. Persiste en `sample_sets`: `retiro_fedex_fecha`, `retiro_fedex_lugar`, `retiro_fedex_url` y `retiro_fedex_pedido_id` devuelto por `FedEx`. El `SampleSet` permanece en `EstadoSampleSet.CERRADO` (y los estudios en `EstadoEstudio.EN_ESPERA_RETIRO`) hasta que se cumpla la hora de retiro e impacte el callback de `FedEx`.
+6. Persiste en `sample_sets`: `retiro_fedex_fecha`, `retiro_fedex_lugar`, `retiro_fedex_url` y `retiro_fedex_pedido_id` devuelto por `FedEx`, y registra estos cambios en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'modificacion'`, `usuario_id = usuario_actual.id`, `origen = 'usuario'`). El `SampleSet` permanece en `EstadoSampleSet.CERRADO` (y los estudios en `EstadoEstudio.EN_ESPERA_RETIRO`) hasta que se cumpla la hora de retiro e impacte el callback de `FedEx`.
 **Timeout**: 10s
 **Input**:
 ```json
@@ -156,8 +158,8 @@
 **Action**: En el día y hora programados, el módulo de `FedEx` invoca la URL (`retiro_fedex_url`) que le fue indicada en STEP 3:
 1. Bloquea la fila del `SampleSet` (`SELECT ... FOR UPDATE`).
 2. Verifica que `sample_set.estado == EstadoSampleSet.CERRADO` y valida el `pedido_id` / firma del webhook.
-3. Cambia `sample_set.estado = EstadoSampleSet.EN_VIAJE_COREA` en la tabla `sample_sets`.
-4. Cambia el estado de **todos** los `Estudio`s cuyas muestras integran ese `SampleSet` de `EstadoEstudio.EN_ESPERA_RETIRO` a `EstadoEstudio.EN_VIAJE_COREA`.
+3. Cambia `sample_set.estado = EstadoSampleSet.EN_VIAJE_COREA` en la tabla `sample_sets` y registra en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'cambio_estado'`, `usuario_id = None`, `origen = 'webhook_fedex'`, `cambios = {"estado": {"anterior": "cerrado", "nuevo": "en_viaje_a_corea"}}`).
+4. Cambia el estado de **todos** los `Estudio`s cuyas muestras integran ese `SampleSet` de `EstadoEstudio.EN_ESPERA_RETIRO` a `EstadoEstudio.EN_VIAJE_COREA` y registra cada transición en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`, `origen = 'webhook_fedex'`). *(Si posteriormente una muestra arribara a Corea con baja calidad, solo ese `Estudio` retrocederá a `REMUESTREO_REQUERIDO` en el Escenario 10 sin alterar este `SampleSet` histórico).*
 **Timeout**: 5s
 **Input**:
 ```json
@@ -360,6 +362,7 @@ Estudio (EstadoEstudio):
 |---|---|---|---|---|
 | RC-1 | En `app/src/core/models/logistica.py` (`SampleSet`, líneas 31-37), las columnas `csv_path`, `autorizacion_ministerio_pdf_path`, `retiro_fedex_fecha`, `retiro_fedex_lugar`, `retiro_fedex_url` y `retiro_fedex_pedido_id` están definidas en la tabla `sample_sets`. Como cada `Estudio` se relaciona con su `Muestra` vigente (`estudio.muestra_vigente.sample_set`), el `CSV` y la `Autorización del Ministerio` quedan automáticamente asociados a todos los `Estudio`s del lote sin duplicar columnas en `estudios`. | Low | STEP 1 & 2 | Documentada explícitamente esta relación en STEP 1 y STEP 2. |
 | RC-2 | El LEL establece que cada `Sample set` viaja en un paquete independiente (`"No. Cada uno es un paquete aparte"`, `.ai/1-Entrevista.md` línea 467). | Low | STEP 3 | El endpoint de retiro y el `pedido_id` de `FedEx` operan estrictamente por un único `sample_set_id`. |
+| RC-3 | **[BRECHA DETECTADA]** Toda mutación sobre `sample_sets` y `estudios` (incluyendo CSV, PDF ministerial, programación FedEx y webhook de retiro) requiere invocación a `AuditoriaService.registrar_modificacion(...)` todavía ausente en `app/src/core/services/logistica_service.py`. | Medium | STEP 1–4 | Integrar `AuditoriaService` en cada mutación de `LogisticaService`. |
 
 ---
 
@@ -393,3 +396,4 @@ Estudio (EstadoEstudio):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/logistica.py`, `estudios.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 5 y 6 (ADR-003/ADR-004): incorporada auditoría en `registro_modificaciones` sobre `SampleSet` y `Estudio` en los pasos 1–4 y referencia al eventual remuestreo individual desde `EN_VIAJE_COREA` (Escenario 10). | Especificación actualizada y registrada brecha RC-3. |

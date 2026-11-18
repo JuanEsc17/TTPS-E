@@ -24,7 +24,7 @@ def registrar_manejadores_errores(app: Flask) -> None:
         return (
             jsonify(
                 {
-                    "ok:":False,
+                    "ok": False,
                     "error": "Los datos enviados son invalidos o estan incompletos.",
                     "code": "DATOS_INVALIDOS",
                     "retryable": False,

@@ -1,0 +1,88 @@
+name: Reporte de Bug
+description: Reportar un error o comportamiento inesperado en el sistema TTPS-E
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar este problema. Por favor, verificá que no exista un issue similar antes de crear uno nuevo y completá los detalles necesarios para reproducirlo.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área afectada
+      description: Seleccioná la capa o módulo principal donde se manifiesta el error.
+      options:
+        - Backend - Router / API (app/src/web)
+        - Backend - Lógica de negocio / Servicios (app/src/core)
+        - Backend - Repositorio / Base de datos (PostgreSQL)
+        - Backend - Clientes externos (app/src/clients)
+        - Frontend - React (frontend/)
+        - Documentación / Specs SDD (docs/specs/)
+        - Otro
+    validations:
+      required: true
+
+  - type: input
+    id: escenario
+    attributes:
+      label: Escenario o Spec relacionada
+      description: Indicá el escenario de `.ai/3-Escenarios.md` o el archivo en `docs/specs/` vinculado (si aplica).
+      placeholder: "Ej.: Escenario 05 - docs/specs/escenario-05-reautorizar-un-estudio-rechazado.md"
+    validations:
+      required: false
+
+  - type: textarea
+    id: descripcion
+    attributes:
+      label: Descripción del bug
+      description: Explicá de forma clara y concisa en qué consiste el error.
+      placeholder: "Al intentar cambiar el estado de un estudio..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduccion
+    attributes:
+      label: Pasos para reproducir
+      description: Detallá paso a paso cómo provocar el error.
+      value: |
+        1. Ir a / enviar request a '...'
+        2. Ejecutar acción / cargar datos '...'
+        3. Observar el error '...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: esperado
+    attributes:
+      label: Comportamiento esperado vs. actual
+      description: Indicá qué debería haber pasado según la spec o el glosario LEL y qué ocurrió realmente.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, traceback o respuesta de API
+      description: Pegá el stacktrace, error de consola o payload JSON relevante (evitá incluir credenciales o datos sensibles de `.env`).
+    validations:
+      required: false
+
+  - type: input
+    id: entorno
+    attributes:
+      label: Entorno / Rama
+      description: Rama de Git, entorno de ejecución o navegador utilizado.
+      placeholder: "Ej.: rama development, Python 3.14, PostgreSQL, Chrome"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Verificación previa
+      options:
+        - label: Busqué en los issues existentes y confirmé que este problema no fue reportado previamente.
+          required: true

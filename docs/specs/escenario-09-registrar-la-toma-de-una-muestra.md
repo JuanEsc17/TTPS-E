@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 9 – Registrar la toma de una muestra
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-9`
 
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Administrativo`, `Paciente`, `Transportista` |
-| **Objetos** | `Centro de extracción`, `Bot de Telegram`, `Muestra`, `Turno`, `Estudio`, `Aviso` |
-| **Verbos** | `Armar sample set` *(posterior al retiro y llegada al laboratorio central)* |
+| **Objetos** | `Centro de extracción`, `Bot de Telegram`, `Muestra`, `Turno`, `Estudio`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Armar sample set` *(posterior al retiro y llegada al laboratorio central)*, `Registrar modificación` |
 | **Estados** | `Turno sacado`, `Lista para retirar` |
 
 ---
@@ -26,7 +26,7 @@
 - **Episodios**:
   1. El `Centro de extracción` informa la toma de la `Muestra` enviando un mensaje al `Bot de Telegram` del laboratorio central.
   2. El sistema recibe el aviso a través del webhook/integración del `Bot de Telegram`.
-  3. El sistema registra la `Muestra` (`tomada_en`, `estudio_id`, `turno_id`, y opcionalmente `mililitros`), marca `Turno.asistio = True` y cambia el estado del `Estudio` de `Turno sacado` a `Lista para retirar` (`EstadoEstudio.LISTA_PARA_RETIRAR`).
+  3. El sistema registra la `Muestra` (`tomada_en`, `estudio_id`, `turno_id`), marca `Turno.asistio = True`, cambia el estado del `Estudio` de `Turno sacado` a `Lista para retirar` (`EstadoEstudio.LISTA_PARA_RETIRAR`) y registra la transición en `registro_modificaciones`.
   4. El sistema informa mediante `Aviso` (al `Administrativo` y para la planificación de la `Orden del día` del `Transportista` de esa provincia) que la `Muestra` está `Lista para retirar` en el `Centro de extracción`.
 
 ---
@@ -67,10 +67,10 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
 **Actor**: `router` (`telegram_webhook_router`) -> `service` (`logistica_service`)
 **Action**:
 1. Verifica el token de seguridad del webhook (`X-Telegram-Bot-Api-Secret-Token`) para impedir que terceros no autorizados inyecten confirmaciones falsas de muestras.
-2. Extrae del mensaje/payload el identificador de referencia (`estudio_id`, `turno_id` o `paciente_dni` + `centro_id`) y, si fue informado, el volumen en `mililitros` del tubo.
+2. Extrae del mensaje/payload el identificador de referencia (`estudio_id`, `turno_id` o `paciente_dni` + `centro_id`).
 **Timeout**: `2s`
 **Input**: Header `X-Telegram-Bot-Api-Secret-Token` + Payload JSON del `Bot de Telegram`.
-**Output on SUCCESS**: Datos normalizados (`estudio_id` / `turno_id`, `mililitros` opcional, `timestamp_mensaje`) -> `GO TO STEP 2`
+**Output on SUCCESS**: Datos normalizados (`estudio_id` / `turno_id`, `timestamp_mensaje`) -> `GO TO STEP 2`
 **Output on FAILURE**:
   - `FAILURE(forbidden)`: Header `X-Telegram-Bot-Api-Secret-Token` ausente o inválido -> `return 403 Forbidden` (`{"ok": false, "error": "Token de bot de Telegram inválido", "code": "INVALID_TELEGRAM_SECRET", "retryable": false}`).
   - `FAILURE(validation_error)`: El mensaje no contiene un `estudio_id` ni `turno_id` / `dni` válido -> Responde al `Bot de Telegram` con mensaje de formato inválido y retorna `400 Bad Request` (`code: "FORMATO_MENSAJE_INVALIDO"`).
@@ -113,17 +113,19 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
    - `estudio_id = estudio.id`
    - `turno_id = turno.id`
    - `sample_set_id = None`
-   - `mililitros = input.mililitros` (puede ser `None` si los mililitros se miden al recepcionar en el laboratorio central, o un `Decimal` >= 2.00; si en el momento de la carga ya se informara `< 2` ml, el Escenario 10 de remuestreo aplica `MotivoDescarte.VOLUMEN_INSUFICIENTE`)
    - `tomada_en = func.now()`
    - `llegada_lab_central = None`
    - `motivo_descarte = None`
+   - `observaciones_calidad = None`
+   *(Nota: se elimina el control o rechazo por volumen mínimo `< 2 ml` según ADR-004 / Requerimiento 5).*
 3. Actualiza el estado del `Estudio`:
    - `estudio.estado = EstadoEstudio.LISTA_PARA_RETIRAR` (`"Lista para retirar"`).
+   - Registra el cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = None`, `origen = 'webhook_telegram'`, `cambios = {"estado": {"anterior": "Turno sacado", "nuevo": "Lista para retirar"}, "muestra_id": {"anterior": None, "nuevo": muestra.id}}`).
 4. Inserta un `Aviso` en la tabla `avisos` para los usuarios con `Rol.ADMINISTRATIVO` y para el `Paciente` (`canal = CanalAviso.APP`):
    - `"La muestra del estudio #<id> fue tomada en el centro <centro.nombre> y se encuentra Lista para retirar."`
 5. Ejecuta `session.commit()`.
 **Timeout**: `4s`
-**Input**: `Estudio`, `Turno`, `mililitros` (opcional)
+**Input**: `Estudio`, `Turno`
 **Output on SUCCESS**: `Muestra` creada (`muestra.id`) y `estudio.estado == EstadoEstudio.LISTA_PARA_RETIRAR` -> `GO TO STEP 4`
 **Output on FAILURE**:
   - `FAILURE(db_error)` / `FAILURE(timeout)`: Error al insertar en `muestras` o actualizar `estudios` -> `GO TO ABORT_CLEANUP`.
@@ -195,8 +197,7 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
   "message_id": 88412,
   "chat_id": 10029384,
   "estudio_id": 101,
-  "turno_id": 501,
-  "mililitros": "4.50"
+  "turno_id": 501
 }
 ```
 *(Nota: El endpoint también soporta el formato nativo de actualización de Telegram `{"update_id": ..., "message": {"text": "/muestra 101"}}` extrayendo `estudio_id` del texto del comando).*
@@ -209,7 +210,6 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
     "estudio_id": 101,
     "turno_id": 501,
     "tomada_en": "2026-11-02T09:22:10Z",
-    "mililitros": "4.50",
     "asistio": true,
     "estado_estudio": "Lista para retirar"
   }
@@ -244,7 +244,7 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
 
 | # | Finding | Severity | Spec section affected | Resolution |
 |---|---|---|---|---|
-| RC-1 | En `app/src/core/models/logistica.py`, `Muestra` tiene exactamente las columnas `estudio_id`, `turno_id`, `sample_set_id`, `mililitros` (`Numeric(5, 2)`), `tomada_en` (`# aviso por bot de Telegram`), `llegada_lab_central` y `motivo_descarte`. | Low | STEP 3 | 100% alineado con el modelo `Muestra`. |
+| RC-1 | **[BRECHA DETECTADA]** En `app/src/core/models/logistica.py`, `Muestra` aún conserva la columna `mililitros` (`Numeric(5, 2)`), que deja de ser requerida funcionalmente tras la eliminación de la regla `< 2 ml` (Requerimiento 5 / ADR-004). | Medium | STEP 1, STEP 3, Handoff | Retirar o deprecar `mililitros` y agregar `observaciones_calidad` en próxima migración sin alterar migraciones aplicadas. |
 | RC-2 | En `app/src/core/models/estudios.py`, la propiedad `Estudio.muestra_vigente` devuelve la última muestra con `m.motivo_descarte is None`. Al insertar la nueva `Muestra` con `motivo_descarte = None` en `STEP 3`, `estudio.muestra_vigente` pasa a apuntar automáticamente a esta muestra. | Low | STEP 3 | Verificado y compatible con el ciclo de remuestreo (Escenario 10). |
 | RC-3 | En `app/src/core/models/enums.py`, el estado correspondiente del LEL es `EstadoEstudio.LISTA_PARA_RETIRAR = "Lista para retirar"` y el canal de aviso incluye `CanalAviso.TELEGRAM = "telegram"` y `CanalAviso.APP = "app"`. | Low | State Transitions | Nombres de enums exactos utilizados en toda la especificación. |
 
@@ -258,7 +258,7 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
 | **TC-02: Idempotencia ante reintento duplicado del webhook de Telegram** | Se envía dos veces el mismo webhook para el mismo `estudio_id` y `turno_id`. | La segunda llamada retorna `200 OK` devolviendo la misma `Muestra` sin duplicar filas en `muestras`. |
 | **TC-03: Rechazo por token secreto de Telegram inválido o ausente** | `POST /api/v1/webhooks/telegram/muestra-tomada` sin header `X-Telegram-Bot-Api-Secret-Token` o con valor incorrecto. | Retorna `403 Forbidden` (`code: "INVALID_TELEGRAM_SECRET"`); no modifica el estudio ni crea muestra. |
 | **TC-04: Rechazo cuando el estudio no está en estado Turno sacado** | `POST /api/v1/webhooks/telegram/muestra-tomada` para un estudio en `Creado` o cuyo turno fue cancelado (`activo == False`). | Retorna `409 Conflict` (`code: "ESTADO_ESTUDIO_INVALIDO"`); 0 filas creadas en `muestras`. |
-| **TC-05: Toma de muestra luego de un Remuestreo requerido** | Un estudio que tenía una 1.ª muestra con `motivo_descarte = VOLUMEN_INSUFICIENTE`, sacó un 2.º turno (`Turno sacado`) y recibe confirmación de toma de muestra. | Retorna `200 OK`; se crea una 2.ª fila en `muestras` con `motivo_descarte = None`; `estudio.muestra_vigente` devuelve la 2.ª muestra y `Estudio.estado` pasa a `EstadoEstudio.LISTA_PARA_RETIRAR`. |
+| **TC-05: Toma de muestra luego de un Remuestreo requerido** | Un estudio que tenía una 1.ª muestra descartada con `motivo_descarte = MotivoDescarte.BAJA_CALIDAD`, sacó un 2.º turno (`Turno sacado`) y recibe confirmación de toma de muestra. | Retorna `200 OK`; se crea una 2.ª fila en `muestras` con `motivo_descarte = None`; `estudio.muestra_vigente` devuelve la 2.ª muestra y `Estudio.estado` pasa a `EstadoEstudio.LISTA_PARA_RETIRAR`. |
 | **TC-06: Estudio o turno inexistente** | `POST /api/v1/webhooks/telegram/muestra-tomada` con `estudio_id = 99999`. | Retorna `404 Not Found` (`code: "ESTUDIO_O_TURNO_NO_ENCONTRADO"`). |
 
 ---
@@ -271,10 +271,11 @@ El `Centro de extracción` envía el mensaje de confirmación al `Bot de Telegra
 
 ## Open Questions
 
-- ¿La medición de `mililitros` del tubo (`ML_MINIMOS_TUBO = 2`) se informa en el mensaje del `Bot de Telegram` al tomar la muestra o cuando el `Administrativo` / laboratorio central recepciona el tubo? *(El modelo `Muestra.mililitros` es `Optional[Decimal]`, por lo que este flujo soporta recibirlo opcionalmente en la toma o registrarlo en la recepción en el laboratorio central antes del Escenario 10).*
+- ¿La actualización automática del `Registro de modificaciones` al recibir el webhook del `Bot de Telegram` debe registrar `"webhook_telegram"` como `origen` en `registro_modificaciones` con `usuario_id = None`? *(Definido así en STEP 3 conforme a ADR-003).*
 
 ## Spec vs Reality Audit Log
 
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/logistica.py`, `turnos.py` y `estudios.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 5 y 6: eliminada referencia funcional a `mililitros` / `< 2 ml` / `ML_MINIMOS_TUBO` / `VOLUMEN_INSUFICIENTE`, agregada auditoría en `registro_modificaciones` y brecha RC-1. | Especificación actualizada (ver ADR-003 y ADR-004). |

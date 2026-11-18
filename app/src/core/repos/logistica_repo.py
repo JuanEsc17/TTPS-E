@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from ..database import db
@@ -36,7 +36,10 @@ class LogisticaRepo:
                 OrdenDelDia.transportista_id == transportista_id,
                 OrdenDelDia.fecha == fecha,
             )
-            .options(selectinload(OrdenDelDia.paradas).selectinload(OrdenDelDiaParada.centro))
+            .options(
+                selectinload(OrdenDelDia.paradas).selectinload(OrdenDelDiaParada.centro),
+                selectinload(OrdenDelDia.posiciones),
+            )
         )
         return db.session.execute(stmt).scalar_one_or_none()
 
@@ -48,6 +51,7 @@ class LogisticaRepo:
             .options(
                 selectinload(OrdenDelDia.transportista),
                 selectinload(OrdenDelDia.paradas).selectinload(OrdenDelDiaParada.centro),
+                selectinload(OrdenDelDia.posiciones),
             )
         )
         return db.session.execute(stmt).scalar_one_or_none()
@@ -103,6 +107,26 @@ class LogisticaRepo:
             )
         db.session.flush()
         return orden
+
+    @staticmethod
+    def reemplazar_paradas_orden(
+        orden_id: int,
+        centros_ordenados: list[CentroExtraccion],
+    ) -> None:
+        """Reemplaza el orden de paradas pendientes cuando aun no hubo recogidas."""
+        db.session.execute(
+            delete(OrdenDelDiaParada).where(OrdenDelDiaParada.orden_id == orden_id)
+        )
+        db.session.flush()
+        for posicion, centro in enumerate(centros_ordenados, start=1):
+            db.session.add(
+                OrdenDelDiaParada(
+                    orden_id=orden_id,
+                    centro_id=centro.id,
+                    posicion=posicion,
+                )
+            )
+        db.session.flush()
 
     @staticmethod
     def listar_muestras_por_centro_y_estado(

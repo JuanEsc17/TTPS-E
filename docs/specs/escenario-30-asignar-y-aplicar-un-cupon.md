@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 30 – Asignar y aplicar un cupón
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-30`
@@ -13,10 +13,11 @@
 | **Sujetos** | **Médico** | `Usuario` (`rol = Rol.MEDICO` o `Rol.GERENTE_MEDICO`) + `Medico` (`Cupon.medico_id`, médico tratante) |
 | **Sujetos** | **Paciente** | `Usuario` (`rol = Rol.PACIENTE`) + `Paciente` (`Cupon.paciente_id`, `Estudio.paciente_id`) |
 | **Objetos** | **Cupón** | Modelo `Cupon` (tabla `cupones`) |
-| **Objetos** | **Presupuesto** | Modelo `Presupuesto` (tabla `presupuestos`) y modelo `Pago` (tabla `pagos`) |
+| **Objetos** | **Presupuesto** | Modelo `Presupuesto` (tabla `presupuestos`), `Pago` (`pagos`) y `Cuota` (`cuotas`) |
 | **Objetos** | **Estudio** | Modelo `Estudio` (tabla `estudios`) |
 | **Objetos** | **Obra social** | Modelo `ObraSocial` (tabla `obras_sociales`: `porcentaje_cobertura`) |
 | **Objetos** | **API de cupones** | Cliente HTTP externo (`app/src/clients/cupones_client.py`) para validar vigencia y consumir/vencer el cupón |
+| **Objetos** | **API de MercadoPago** | Pasarela externa (`mercadopago_client.py`) cuando el pago particular se abona en un pago o en cuotas |
 | **Verbos** | **Pagar presupuesto** | Acción del **paciente** que abona el **presupuesto** aplicando el **cupón** y habilita **sacar turno** |
 | **Estados** | **Creado**, **Autorizado** | `EstadoEstudio.CREADO` (pago particular) o `EstadoEstudio.AUTORIZADO` (copago remanente con **obra social**) |
 
@@ -36,7 +37,7 @@
 
 **Resumen del flujo:** El escenario se compone de dos etapas encadenadas sobre la entidad `Cupon`:
 1. **Asignación (`STEP 1` y `STEP 2`):** El **gerente médico** asigna un **cupón** disponible a un **médico** (`PATCH /api/cupones/{cupon_id}/asignar-medico`, si no lo asignó al crearlo), y el **médico** tratante asigna uno de sus **cupones** disponibles a su **paciente** (`PATCH /api/cupones/{cupon_id}/asignar-paciente`).
-2. **Aplicación en el pago (`STEP 3` a `STEP 5`):** Cuando el **paciente** abona el **presupuesto** (`POST /api/estudios/{estudio_id}/pagos` incluyendo `codigo_cupon`), el servicio bloquea la fila del **cupón** (`SELECT ... FOR UPDATE`), verifica que pertenezca al **paciente** y no esté usado, consulta su vigencia en la **API de cupones**, calcula el monto neto acumulando `ObraSocial.porcentaje_cobertura` + `Cupon.descuento_porcentaje` (truncado a un máximo del 100% del `Presupuesto.monto_total_usd`), notifica el consumo a la **API de cupones** para que venza y persiste atómicamente el registro en `pagos` junto con `cupones.usado = True` y `cupones.usado_en = now()`.
+2. **Aplicación en el pago con MercadoPago o copago (`STEP 3` a `STEP 5`):** Cuando el **paciente** inicia el pago del **presupuesto** (`POST /api/v1/estudios/{estudio_id}/pagos` con `codigo_cupon` y `cantidad_cuotas >= 1`), el servicio bloquea la fila del **cupón** (`SELECT ... FOR UPDATE`), verifica que pertenezca al **paciente** y no esté usado, consulta su vigencia en la **API de cupones**, calcula el monto neto acumulando `ObraSocial.porcentaje_cobertura` + `Cupon.descuento_porcentaje` (truncado al 100% del `Presupuesto.monto_total_usd`) **antes de dividir en `Cuotas`**, crea el `Pago` y su preferencia en **MercadoPago**, y **solo cuando el webhook de MercadoPago confirma el pago (`approved`)** notifica el consumo a la **API de cupones** (`POST /canjear_cupon`) y marca `cupones.usado = True` y `cupones.usado_en = now()` (evitando quemar cupones en checkouts abandonados).
 
 ---
 
@@ -427,3 +428,4 @@ Estudio (estudios.estado):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada alineada con `Cupon`, `Presupuesto`, `Pago` y `ObraSocial` en `app/src/core/models/economia.py`. | Aprobada. |
+| 2026-11-17 | Adaptada al flujo de pago en cuotas con `MercadoPago` (Esc. 06 v2.0): descuento prorrateado antes de generar cuotas y consumo del cupón diferido al webhook `approved`. | Actualizada a v1.1. |

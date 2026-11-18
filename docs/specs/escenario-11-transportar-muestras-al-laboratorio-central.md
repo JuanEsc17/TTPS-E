@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 11 – Transportar muestras al laboratorio central
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-11-Transportar-muestras-al-laboratorio-central`
 
@@ -16,7 +16,9 @@
 | **Objeto** | `Muestra` | `Muestra` en `muestras` |
 | **Objeto** | `Estudio` | `Estudio` en `estudios` |
 | **Objeto** | `Mapa de seguimiento` | `PosicionTransporte` en `posiciones_transporte` |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` *(auditoría de `Estudio`)* |
 | **Verbo** | `Armar sample set` | Disparo automático al llegar al laboratorio central (Escenario 12) |
+| **Verbo** | `Registrar modificación` | Asiento atómico en `registro_modificaciones` al cambiar estado del `Estudio` |
 | **Estado** | `Lista para retirar` | `EstadoEstudio.LISTA_PARA_RETIRAR` (`"Lista para retirar"`) |
 | **Estado** | `En camino al laboratorio central` | `EstadoEstudio.EN_CAMINO_LAB_CENTRAL` (`"En camino al laboratorio central"`) |
 | **Estado** | `En laboratorio central` | `EstadoEstudio.EN_LAB_CENTRAL` (`"En laboratorio central"`) |
@@ -102,7 +104,7 @@
 1. Verifica que la `OrdenDelDia` pertenezca al `Transportista` autenticado y que `parada.retirada_en` sea `None`.
 2. Registra `parada.retirada_en = now()` en `ordenes_del_dia_paradas`.
 3. Opcionalmente registra la coordenada del `CentroExtraccion` (`latitud`, `longitud`) como punto inicial en `posiciones_transporte` para el `Mapa de seguimiento`.
-4. Selecciona todos los `Estudio`s cuyas `Muestra`s vigentes pertenezcan a turnos de ese `centro_id` y cuyo estado sea `EstadoEstudio.LISTA_PARA_RETIRAR`, y actualiza su estado a `EstadoEstudio.EN_CAMINO_LAB_CENTRAL`.
+4. Selecciona todos los `Estudio`s cuyas `Muestra`s vigentes pertenezcan a turnos de ese `centro_id` y cuyo estado sea `EstadoEstudio.LISTA_PARA_RETIRAR`, actualiza su estado a `EstadoEstudio.EN_CAMINO_LAB_CENTRAL`, y registra cada transición en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`, `usuario_id = transportista.usuario_id`, `origen = 'usuario'`).
 **Timeout**: 5s
 **Input**:
 ```json
@@ -134,16 +136,12 @@
 **Action**: Al arribar al laboratorio central con las muestras recolectadas de las paradas retiradas:
 1. Verifica que la `OrdenDelDia` pertenezca al `Transportista` y que exista al menos una parada con `retirada_en IS NOT NULL` y `llegada_lab_central IS NULL`.
 2. Para todas las paradas retiradas pendientes de entrega en esa `OrdenDelDia`, actualiza `parada.llegada_lab_central = now()`.
-3. Para todas las `Muestra`s vigentes de esos centros cuyos `Estudio`s estén en `EstadoEstudio.EN_CAMINO_LAB_CENTRAL`, actualiza `muestra.llegada_lab_central = now()` en `muestras` y cambia `estudio.estado = EstadoEstudio.EN_LAB_CENTRAL` en `estudios`.
+3. Para todas las `Muestra`s vigentes de esos centros cuyos `Estudio`s estén en `EstadoEstudio.EN_CAMINO_LAB_CENTRAL`, actualiza `muestra.llegada_lab_central = now()` en `muestras`, cambia `estudio.estado = EstadoEstudio.EN_LAB_CENTRAL` en `estudios` y registra el cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`, `usuario_id = transportista.usuario_id`, `origen = 'usuario'`).
 **Timeout**: 5s
 **Input**:
 ```json
 {
-  "orden_id": 77,
-  "mililitros_por_muestra": [
-    { "muestra_id": 149, "mililitros": 4.50 },
-    { "muestra_id": 150, "mililitros": 3.00 }
-  ]
+  "orden_id": 77
 }
 ```
 **Output on SUCCESS**: `{ orden_id: 77, llegada_lab_central: "2026-10-28T16:10:00", muestras_recibidas_ids: [149, 150] }` -> GO TO STEP 4
@@ -158,8 +156,8 @@
   - Operator (`Administrativo`) sees: `Muestra`s recibidas en el laboratorio central con timestamp `llegada_lab_central`.
   - Database:
     - Tabla `ordenes_del_dia_paradas`: `llegada_lab_central = '2026-10-28 16:10:00'`.
-    - Tabla `muestras`: `llegada_lab_central = '2026-10-28 16:10:00'`, `mililitros` actualizados si se informaron.
-    - Tabla `estudios`: `estado = 'En laboratorio central'`.
+    - Tabla `muestras`: `llegada_lab_central = '2026-10-28 16:10:00'`.
+    - Tabla `estudios`: `estado = 'En laboratorio central'` y fila de auditoría en `registro_modificaciones`.
   - Logs: `[logistica_service] llegada_laboratorio_central orden_id=77 muestras=[149, 150]`
 
 ---
@@ -297,11 +295,7 @@ OrdenDelDiaParada (ordenes_del_dia_paradas):
 **Endpoint**: `POST /api/logistica/ordenes-del-dia/{orden_id}/llegada-laboratorio-central`
 **Payload**:
 ```json
-{
-  "mililitros_por_muestra": [
-    { "muestra_id": 149, "mililitros": 4.50 }
-  ]
-}
+{}
 ```
 **Success response** (`200 OK`):
 ```json
@@ -344,6 +338,7 @@ OrdenDelDiaParada (ordenes_del_dia_paradas):
 | RC-1 | En `app/src/core/models/logistica.py`, `OrdenDelDia` tiene `UniqueConstraint("transportista_id", "fecha")` y `OrdenDelDiaParada` tiene `UniqueConstraint("orden_id", "posicion")`. Esto garantiza en el nivel de esquema que haya una única orden diaria por transportista y un orden estricto de paradas. | Low | STEP 1 | Alineado con `logistica.py#L59-L87`. |
 | RC-2 | El LEL establece que `"El transportista no puede modificar la orden del día"`. No debe exponerse ningún endpoint `PUT`/`PATCH`/`DELETE` sobre las paradas ni sobre su orden (`posicion`). | High | STEP 1 / Handoff Contracts | Especificado que los únicos endpoints de mutación permitidos al `Transportista` son `/recoger` sobre una parada existente y `/llegada-laboratorio-central`. |
 | RC-3 | `Muestra` no se vincula por FK directa a `OrdenDelDiaParada`, sino a `Turno` (`muestras.turno_id -> turnos.centro_id`) y a `Estudio` (`muestras.estudio_id`). | Medium | STEP 2 & STEP 3 | Especificado que al marcar recogida en `parada.centro_id`, se seleccionan los `Estudio`s en `EstadoEstudio.LISTA_PARA_RETIRAR` cuya `muestra_vigente` provenga de un `Turno` en ese `centro_id`. |
+| RC-4 | **[BRECHA DETECTADA]** La implementación actual en `app/src/core/services/logistica_service.py` y `app/src/web/api/logistica.py` aún acepta el parámetro opcional `mililitros_por_muestra` / persiste `Muestra.mililitros` y aún no registra cambios en `registro_modificaciones`. Tras el Requerimiento 5 y 6 (ADR-003/ADR-004), `mililitros` y la regla `< 2 ml` quedan deprecados. | Medium | STEP 2, STEP 3 | Deprecar `mililitros_por_muestra` en una iteración futura del servicio e integrar `AuditoriaService.registrar_modificacion(...)`. |
 
 ---
 
@@ -378,3 +373,4 @@ OrdenDelDiaParada (ordenes_del_dia_paradas):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/logistica.py`, `turnos.py`, `perfiles.py`, `estudios.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 5 y 6: eliminado `mililitros_por_muestra` del contrato objetivo, agregada auditoría en `registro_modificaciones` y registrada brecha RC-4 contra `logistica_service.py`. | Especificación actualizada (ver ADR-003 y ADR-004). |
