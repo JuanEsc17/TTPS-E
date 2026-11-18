@@ -55,3 +55,9 @@ class AltaPacienteSchema(Schema):
             if isinstance(limpio.get(campo), str):
                 limpio[campo] = limpio[campo].strip()
         return limpio
+
+class GestionarFamiliaresSchema(Schema):
+    class Meta:
+        unknown = EXCLUDE
+
+    familiares = fields.List(fields.Nested(FamiliarInputSchema), required=True)

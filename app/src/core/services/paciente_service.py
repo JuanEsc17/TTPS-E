@@ -25,6 +25,54 @@ def _generar_password_temporal() -> str:
     # Sufijo "A1" garantiza que cumpla la politica de al menos una letra y un numero
     return f"{secrets.token_urlsafe(8)}A1"
 
+def _generar_svg_familiograma(
+    *,
+    nombre_paciente: str,
+    apellido_paciente: str,
+    edad_paciente: int,
+    patologia_nombre: str,
+    familiares_input: list[dict],
+    archivo_nombre: str,
+    familiograma_client: FamiliogramaClient | None = None,
+) -> str | None:
+    """Invoca la API externa de familiograma y guarda el SVG resultante en disco."""
+    cliente_fam = familiograma_client or FamiliogramaClient(timeout=10.0)
+    personas = [
+        {
+            "parentesco": 0,  # 0 representa al paciente en la API de familiograma
+            "nombre": nombre_paciente,
+            "apellido": apellido_paciente,
+            "edad": edad_paciente,
+            "diagnosticos": [{"codigo": patologia_nombre.upper(), "nombre": patologia_nombre}],
+        }
+    ]
+    for fam in familiares_input:
+        parentesco_id = PARENTESCOS_POR_NOMBRE.get(fam["parentesco"].strip().lower(), 1)
+        persona_fam: dict = {
+            "parentesco": parentesco_id,
+            "nombre": fam["nombre"],
+            "apellido": apellido_paciente,
+        }
+        if fam.get("diagnostico_previo"):
+            diag = fam["diagnostico_previo"].strip()
+            persona_fam["diagnosticos"] = [{"codigo": diag.upper()[:30], "nombre": diag}]
+        personas.append(persona_fam)
+
+    try:
+        resp_fam = cliente_fam.generar_familiograma(personas)
+        base64_img = (resp_fam.get("imagen") or {}).get("base64")
+        if not base64_img:
+            return None
+        destino = _STORAGE_FAMILIOGRAMAS / archivo_nombre
+        cliente_fam.guardar_svg(base64_img, destino)
+        return str(destino).replace("\\", "/")
+    except ClienteError as exc:
+        raise ErrorDominio(
+            f"No se pudo generar el familiograma del paciente: {exc} | Detalle: {exc.respuesta}",
+            codigo="FAMILIOGRAMA_SERVICE_ERROR",
+            http_status=502,
+            reintentable=True,
+        ) from exc
 
 def listar_pacientes_medico(usuario_actual_id: int) -> list[dict]:
     """Lista los pacientes registrados por el medico autenticado."""
@@ -129,41 +177,15 @@ def dar_de_alta_paciente(
     # E1: solo si hay familiares genera el familiograma antes de confirmar el alta
     familiograma_path: str | None = None
     if familiares_input:
-        cliente_fam = familiograma_client or FamiliogramaClient(timeout=10.0)
-        personas = [
-            {
-                "parentesco": 0,  # 0 representa al paciente en la API de familiograma
-                "nombre": datos["nombre"],
-                "apellido": datos["apellido"],
-                "edad": edad,
-                "diagnosticos": [{"codigo": patologia.nombre.upper(), "nombre": patologia.nombre}],
-            }
-        ]
-        for fam in familiares_input:
-            parentesco_id = PARENTESCOS_POR_NOMBRE.get(fam["parentesco"].strip().lower(), 1)
-            persona_fam: dict = {
-                "parentesco": parentesco_id,
-                "nombre": fam["nombre"],
-                "apellido": datos["apellido"],
-            }
-            if fam.get("diagnostico_previo"):
-                diag = fam["diagnostico_previo"].strip()
-                persona_fam["diagnosticos"] = [{"codigo": diag.upper()[:30], "nombre": diag}]
-            personas.append(persona_fam)
-        try:
-            resp_fam = cliente_fam.generar_familiograma(personas)
-            base64_img = (resp_fam.get("imagen") or {}).get("base64")
-            if base64_img:
-                destino = _STORAGE_FAMILIOGRAMAS / f"paciente_dni_{dni}.svg"
-                cliente_fam.guardar_svg(base64_img, destino)
-                familiograma_path = str(destino).replace("\\", "/")
-        except ClienteError as exc:
-            raise ErrorDominio(
-                f"No se pudo generar el familiograma del paciente: {exc} | Detalle: {exc.respuesta}",
-                codigo="FAMILIOGRAMA_SERVICE_ERROR",
-                http_status=502,
-                reintentable=True,
-            ) from exc
+        familiograma_path = _generar_svg_familiograma(
+            nombre_paciente=datos["nombre"],
+            apellido_paciente=datos["apellido"],
+            edad_paciente=edad,
+            patologia_nombre=patologia.nombre,
+            familiares_input=familiares_input,
+            archivo_nombre=f"paciente_dni_{dni}.svg",
+            familiograma_client=familiograma_client,
+        )
 
     password_temporal = _generar_password_temporal()
     password_hash = hashear_password(password_temporal)
@@ -216,3 +238,161 @@ def dar_de_alta_paciente(
         "familiograma_pdf_path": paciente.familiograma_pdf_path,
         "debe_cambiar_password": usuario.debe_cambiar_password,
     }
+
+def _serializar_familiares(familiares: list) -> list[dict]:
+    return [
+        {
+            "id": f.id,
+            "nombre": f.nombre,
+            "parentesco": f.parentesco,
+            "diagnostico_previo": f.diagnostico_previo,
+            "sintomas": [
+                {"id": s.id, "snomed_id": s.snomed_id, "descripcion": s.descripcion}
+                for s in f.sintomas
+            ],
+        }
+        for f in familiares
+    ]
+
+
+def obtener_familiares_paciente(*, usuario_actual_id: int, paciente_id: int) -> dict:
+    """Devuelve los familiares registrados de un paciente y la URL del familiograma."""
+    medico = paciente_repo.buscar_medico_por_usuario_id(usuario_actual_id)
+    if medico is None:
+        raise ErrorDominio(
+            "Solo un medico tratante o gerente medico puede consultar familiares.",
+            codigo="FORBIDDEN_ROLE",
+            http_status=403,
+        )
+
+    paciente = paciente_repo.buscar_paciente_por_id(paciente_id)
+    if paciente is None:
+        raise ErrorDominio(
+            "El paciente indicado no existe.",
+            codigo="PACIENTE_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    return {
+        "paciente_id": paciente.id,
+        "nombre_completo": f"{paciente.usuario.nombre} {paciente.usuario.apellido}",
+        "familiares": _serializar_familiares(paciente.familiares),
+        "familiograma_generado": bool(paciente.familiograma_pdf_path),
+        "familiograma_pdf_path": paciente.familiograma_pdf_path,
+        "familiograma_url": f"/api/v1/pacientes/{paciente.id}/familiograma"
+        if paciente.familiograma_pdf_path
+        else None,
+    }
+
+
+def gestionar_informacion_familiar(
+    *,
+    usuario_actual_id: int,
+    paciente_id: int,
+    familiares_input: list[dict],
+    familiograma_client: FamiliogramaClient | None = None,
+) -> dict:
+    """Registra o actualiza los familiares de un paciente y regenera el familiograma (E18)."""
+    medico = paciente_repo.buscar_medico_por_usuario_id(usuario_actual_id)
+    if medico is None:
+        raise ErrorDominio(
+            "Solo un medico tratante o gerente medico puede gestionar informacion familiar.",
+            codigo="FORBIDDEN_ROLE",
+            http_status=403,
+        )
+
+    paciente = paciente_repo.buscar_paciente_por_id(paciente_id)
+    if paciente is None:
+        raise ErrorDominio(
+            "El paciente indicado no existe.",
+            codigo="PACIENTE_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    familiares_data: list[dict] = []
+    for fam in familiares_input:
+        nombre_fam = (fam.get("nombre") or "").strip()
+        parentesco_fam = (fam.get("parentesco") or "").strip()
+        diag_fam = (fam.get("diagnostico_previo") or "").strip() or None
+        if not nombre_fam or not parentesco_fam:
+            raise ErrorDominio(
+                "Cada familiar debe tener nombre y parentesco.",
+                codigo="DATOS_FAMILIARES_INVALIDOS",
+                http_status=400,
+            )
+
+        sids = list(dict.fromkeys(str(s).strip() for s in (fam.get("sintomas_snomed_ids") or []) if str(s).strip()))
+        sintomas_fam = clinica_repo.buscar_sintomas_por_snomed_ids(sids)
+        if len(sintomas_fam) != len(sids):
+            raise ErrorDominio(
+                "Uno o mas sintomas SNOMED indicados para el familiar no existen en el catalogo.",
+                codigo="DATOS_FAMILIARES_INVALIDOS",
+                http_status=400,
+            )
+
+        familiares_data.append(
+            {
+                "parentesco": parentesco_fam,
+                "nombre": nombre_fam,
+                "diagnostico_previo": diag_fam,
+                "sintomas_ids": [s.id for s in sintomas_fam],
+            }
+        )
+
+    familiograma_path: str | None = None
+    if familiares_input:
+        familiograma_path = _generar_svg_familiograma(
+            nombre_paciente=paciente.usuario.nombre,
+            apellido_paciente=paciente.usuario.apellido,
+            edad_paciente=_calcular_edad(paciente.fecha_nacimiento),
+            patologia_nombre=paciente.diagnostico_presuntivo.nombre,
+            familiares_input=familiares_input,
+            archivo_nombre=f"paciente_{paciente.id}.svg",
+            familiograma_client=familiograma_client,
+        )
+
+    paciente_repo.reemplazar_familiares(paciente, familiares_data, familiograma_path)
+    paciente_actualizado = paciente_repo.buscar_paciente_por_id(paciente.id)
+
+    return {
+        "paciente_id": paciente.id,
+        "familiares": _serializar_familiares(paciente_actualizado.familiares if paciente_actualizado else []),
+        "familiograma_generado": bool(familiograma_path),
+        "familiograma_pdf_path": familiograma_path,
+        "familiograma_url": f"/api/v1/pacientes/{paciente.id}/familiograma" if familiograma_path else None,
+    }
+
+
+def obtener_archivo_familiograma(*, usuario_actual_id: int, paciente_id: int) -> Path:
+    """Devuelve la ruta en disco del SVG del familiograma de un paciente."""
+    medico = paciente_repo.buscar_medico_por_usuario_id(usuario_actual_id)
+    if medico is None:
+        raise ErrorDominio(
+            "Solo un medico tratante o gerente medico puede ver el familiograma.",
+            codigo="FORBIDDEN_ROLE",
+            http_status=403,
+        )
+
+    paciente = paciente_repo.buscar_paciente_por_id(paciente_id)
+    if paciente is None:
+        raise ErrorDominio(
+            "El paciente indicado no existe.",
+            codigo="PACIENTE_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    if not paciente.familiograma_pdf_path:
+        raise ErrorDominio(
+            "El paciente no tiene un familiograma generado.",
+            codigo="FAMILIOGRAMA_NO_DISPONIBLE",
+            http_status=404,
+        )
+
+    ruta = Path(paciente.familiograma_pdf_path).resolve()
+    if not ruta.is_file():
+        raise ErrorDominio(
+            "El archivo del familiograma no se encontro en el servidor.",
+            codigo="FAMILIOGRAMA_NO_DISPONIBLE",
+            http_status=404,
+        )
+    return ruta

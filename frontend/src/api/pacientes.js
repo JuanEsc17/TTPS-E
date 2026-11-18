@@ -72,3 +72,30 @@ export async function altaPacienteRequest(token, payload) {
     });
     return parseResponse(resp, "No se pudo dar de alta al paciente.");
 }
+
+export async function obtenerFamiliaresRequest(token, pacienteId) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/familiares`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    return parseResponse(resp, "No se pudo cargar la información familiar.");
+}
+
+export async function actualizarFamiliaresRequest(token, pacienteId, familiares) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/familiares`, {
+        method: "PUT",
+        headers: authHeaders(token),
+        body: JSON.stringify({ familiares }),
+    });
+    return parseResponse(resp, "No se pudo actualizar la información familiar.");
+}
+
+export async function obtenerFamiliogramaSvgRequest(token, pacienteId) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/familiograma`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || "No se pudo cargar el familiograma.");
+    }
+    return resp.text();
+}

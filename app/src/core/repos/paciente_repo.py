@@ -136,3 +136,52 @@ def crear_paciente_completo(
             http_status=503,
             reintentable=True,
         ) from exc
+
+def buscar_paciente_por_id(paciente_id: int) -> Paciente | None:
+    """Obtiene un paciente por ID junto con usuario, patologia, familiares y sus sintomas."""
+    stmt = (
+        select(Paciente)
+        .options(
+            selectinload(Paciente.usuario),
+            selectinload(Paciente.diagnostico_presuntivo),
+            selectinload(Paciente.familiares).selectinload(Familiar.sintomas),
+        )
+        .where(Paciente.id == paciente_id)
+    )
+    return db.session.scalar(stmt)
+
+
+def reemplazar_familiares(
+    paciente: Paciente,
+    familiares_data: list[dict],
+    familiograma_pdf_path: str | None,
+) -> Paciente:
+    """Reemplaza la nomina de familiares del paciente y actualiza la ruta del familiograma."""
+    try:
+        # cascade="all, delete-orphan" elimina los familiares previos al limpiar la lista
+        paciente.familiares.clear()
+        db.session.flush()
+
+        for fam in familiares_data:
+            familiar = Familiar(
+                paciente_id=paciente.id,
+                parentesco=fam["parentesco"],
+                nombre=fam["nombre"],
+                diagnostico_previo=fam.get("diagnostico_previo"),
+            )
+            db.session.add(familiar)
+            db.session.flush()
+            for sid in fam.get("sintomas_ids", []):
+                db.session.add(FamiliarSintoma(familiar_id=familiar.id, sintoma_id=sid))
+
+        paciente.familiograma_pdf_path = familiograma_pdf_path
+        db.session.commit()
+        return paciente
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        raise ErrorDominio(
+            "Error temporal al actualizar la informacion familiar. Intente nuevamente.",
+            codigo="ERROR_BASE_DATOS",
+            http_status=503,
+            reintentable=True,
+        ) from exc

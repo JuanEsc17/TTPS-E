@@ -81,7 +81,8 @@ export default function PacientesMedicoPage({ sesion }) {
                                         <th className="pb-3 pr-4">DNI</th>
                                         <th className="pb-3 pr-4">Diagnóstico presuntivo</th>
                                         <th className="pb-3 pr-4">Sospecha</th>
-                                        <th className="pb-3">Familiograma</th>
+                                        <th className="pb-3 pr-4">Familiograma</th>
+                                        <th className="pb-3">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-200/60">
@@ -98,7 +99,7 @@ export default function PacientesMedicoPage({ sesion }) {
                                                 {p.patologia_nombre}
                                             </td>
                                             <td className="py-3 pr-4 capitalize">{p.tipo_sospecha}</td>
-                                            <td className="py-3">
+                                            <td className="py-3 pr-4">
                                                 {p.familiograma_pdf_path ? (
                                                     <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
                                                         Generado
@@ -108,6 +109,14 @@ export default function PacientesMedicoPage({ sesion }) {
                                                         Sin info familiar
                                                     </span>
                                                 )}
+                                            </td>
+                                            <td className="py-3">
+                                                <Link
+                                                    to={`/medico/pacientes/${p.paciente_id}/familiares`}
+                                                    className="font-semibold text-[#0B4F8A] hover:underline"
+                                                >
+                                                    Familiares / Familiograma
+                                                </Link>
                                             </td>
                                         </tr>
                                     ))}

@@ -8,6 +8,7 @@ import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
 import PacientesMedicoPage from "./pages/PacientesMedicoPage";
 import AltaPacientePage from "./pages/AltaPacientePage";
+import FamiliaresPacientePage from "./pages/FamiliaresPacientePage";
 import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 import ChatbotPage from "./pages/ChatbotPage";
 import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
@@ -84,6 +85,7 @@ export default function App() {
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
           <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
           <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
+          <Route path="/medico/pacientes/:pacienteId/familiares" element={<FamiliaresPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}
