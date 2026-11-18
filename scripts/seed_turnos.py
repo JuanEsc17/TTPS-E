@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import argparse
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal
 
 from sqlalchemy import delete, select
 from src import create_app
@@ -14,11 +15,15 @@ from src.core.models import (
     EstadoEstudio,
     Estudio,
     Medico,
+    Muestra,
     OrdenDelDiaParada,
     Paciente,
+    Pago,
     Patologia,
+    Presupuesto,
     ResultadoAutorizacion,
     Rol,
+    TipoPago,
     Turno,
     Usuario,
 )
@@ -77,10 +82,155 @@ def _ahora_utc_naive() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
+def _asegurar_datos_ausencias_y_historial(
+    paciente: Paciente,
+    medico: Medico,
+    patologia: Patologia,
+    centros: list[CentroExtraccion],
+    estudio_principal: Estudio,
+    u_paciente: Usuario,
+) -> dict:
+    """Carga estudios y turnos para probar historial completo y ausencias (1..4 y 5ta)."""
+    ayer = date.today() - timedelta(days=1)
+    hace_3_dias = date.today() - timedelta(days=3)
+    hace_5_dias = date.today() - timedelta(days=5)
+
+    # Limpiamos estudios extra previos del mismo paciente para evitar duplicados al re-ejecutar
+    estudios_extra = list(
+        db.session.scalars(
+            select(Estudio).where(
+                Estudio.paciente_id == paciente.id,
+                Estudio.id != estudio_principal.id,
+            )
+        ).all()
+    )
+    for est in estudios_extra:
+        db.session.execute(delete(Muestra).where(Muestra.estudio_id == est.id))
+        db.session.execute(delete(Turno).where(Turno.estudio_id == est.id))
+        pres = db.session.scalar(select(Presupuesto).where(Presupuesto.estudio_id == est.id))
+        if pres is not None:
+            db.session.execute(delete(Pago).where(Pago.presupuesto_id == pres.id))
+            db.session.delete(pres)
+        db.session.execute(delete(Autorizacion).where(Autorizacion.estudio_id == est.id))
+        db.session.delete(est)
+    db.session.flush()
+
+    # En el estudio principal agregamos 1 turno cancelado previo para verlo en Mis Turnos -> Cancelados
+    db.session.add(
+        Turno(
+            centro_id=centros[1 % len(centros)].id,
+            paciente_id=paciente.id,
+            estudio_id=estudio_principal.id,
+            inicio=datetime.combine(hace_5_dias, time(10, 30)),
+            activo=False,
+            asistio=None,
+        )
+    )
+
+    # Estudio 2: Turno ASISTIDO (con muestra tomada) -> visible en Mis Turnos -> Activos (Asistido)
+    est_asistido = Estudio(
+        paciente_id=paciente.id,
+        medico_id=medico.id,
+        patologia_sospechada_id=patologia.id,
+        estado=EstadoEstudio.LISTA_PARA_RETIRAR,
+        ausencias=0,
+    )
+    db.session.add(est_asistido)
+    db.session.flush()
+    t_asistido = Turno(
+        centro_id=centros[0].id,
+        paciente_id=paciente.id,
+        estudio_id=est_asistido.id,
+        inicio=datetime.combine(hace_3_dias, time(9, 45)),
+        activo=True,
+        asistio=True,
+    )
+    db.session.add(t_asistido)
+    db.session.flush()
+    db.session.add(
+        Muestra(
+            estudio_id=est_asistido.id,
+            turno_id=t_asistido.id,
+            tomada_en=datetime.combine(hace_3_dias, time(10, 5)),
+        )
+    )
+
+    # Estudio 3: Turno vencido de ayer (0 -> 1 ausencia al correr procesar-ausencias)
+    est_primera_ausencia = Estudio(
+        paciente_id=paciente.id,
+        medico_id=medico.id,
+        patologia_sospechada_id=patologia.id,
+        estado=EstadoEstudio.TURNO_SACADO,
+        ausencias=0,
+    )
+    db.session.add(est_primera_ausencia)
+    db.session.flush()
+    db.session.add(
+        Autorizacion(
+            estudio_id=est_primera_ausencia.id,
+            resultado=ResultadoAutorizacion.AUTORIZADA,
+        )
+    )
+    t_vencido_1 = Turno(
+        centro_id=centros[2 % len(centros)].id,
+        paciente_id=paciente.id,
+        estudio_id=est_primera_ausencia.id,
+        inicio=datetime.combine(ayer, time(10, 0)),
+        activo=True,
+        asistio=None,
+    )
+    db.session.add(t_vencido_1)
+
+    # Estudio 4: Al borde del limite (4 ausencias previas + Pago vigente + turno vencido de ayer -> 5ta ausencia anula pago)
+    est_quinta_ausencia = Estudio(
+        paciente_id=paciente.id,
+        medico_id=medico.id,
+        patologia_sospechada_id=patologia.id,
+        estado=EstadoEstudio.TURNO_SACADO,
+        ausencias=4,
+    )
+    db.session.add(est_quinta_ausencia)
+    db.session.flush()
+    presupuesto = Presupuesto(
+        estudio_id=est_quinta_ausencia.id,
+        emitido_por_id=u_paciente.id,
+        cantidad_genes=5,
+        monto_total_usd=Decimal("500.00"),
+    )
+    db.session.add(presupuesto)
+    db.session.flush()
+    pago = Pago(
+        presupuesto_id=presupuesto.id,
+        tipo=TipoPago.PARTICULAR,
+        monto_usd=Decimal("500.00"),
+        anulado=False,
+    )
+    db.session.add(pago)
+    t_vencido_5 = Turno(
+        centro_id=centros[3 % len(centros)].id,
+        paciente_id=paciente.id,
+        estudio_id=est_quinta_ausencia.id,
+        inicio=datetime.combine(ayer, time(11, 15)),
+        activo=True,
+        asistio=None,
+    )
+    db.session.add(t_vencido_5)
+    db.session.flush()
+
+    return {
+        "estudio_asistido_id": est_asistido.id,
+        "estudio_vencido_1_id": est_primera_ausencia.id,
+        "turno_vencido_1_id": t_vencido_1.id,
+        "estudio_vencido_5_id": est_quinta_ausencia.id,
+        "turno_vencido_5_id": t_vencido_5.id,
+    }
+
+
 def cargar_datos_turnos(
     email_paciente: str = EMAIL_PACIENTE,
     password: str = PASSWORD_PACIENTE,
     dispositivo_id: str | None = None,
+    con_ausencias: bool = False,
 ) -> dict:
     email_norm = email_paciente.strip().lower()
     dispositivo = (dispositivo_id or DISPOSITIVO_PACIENTE).strip()
@@ -246,6 +396,17 @@ def cargar_datos_turnos(
                 )
             )
 
+        extra_ausencias = None
+        if con_ausencias:
+            extra_ausencias = _asegurar_datos_ausencias_y_historial(
+                paciente=paciente,
+                medico=medico,
+                patologia=patologia,
+                centros=centros_creados,
+                estudio_principal=estudio,
+                u_paciente=u_paciente,
+            )
+
         db.session.commit()
 
         return {
@@ -256,6 +417,7 @@ def cargar_datos_turnos(
             "centro_id": centros_creados[0].id,
             "centro_nombre": centros_creados[0].nombre,
             "total_centros": len(centros_creados),
+            "extra_ausencias": extra_ausencias,
         }
 
 
@@ -276,12 +438,18 @@ def main() -> None:
         default=None,
         help="UUID de localStorage 'exoma_dispositivo_id' para omitir verificacion 2FA de maquina nueva.",
     )
+    parser.add_argument(
+        "--con-ausencias",
+        action="store_true",
+        help="Carga ademas turnos asistidos, cancelados y 2 turnos vencidos listos para probar procesar-ausencias (1ra y 5ta ausencia).",
+    )
     args = parser.parse_args()
 
     datos = cargar_datos_turnos(
         email_paciente=args.email,
         password=args.password,
         dispositivo_id=args.dispositivo_id,
+        con_ausencias=args.con_ausencias,
     )
     print("=========================================================")
     print("DATOS SEMILLA CARGADOS PARA TURNOS (LA PLATA):")
@@ -291,6 +459,14 @@ def main() -> None:
     print(f"Dispositivo ID:  {datos['dispositivo']}")
     print(f"Estudio ID:      {datos['estudio_id']} (Estado: Autorizado)")
     print(f"Centros listos:  {datos['total_centros']} (principal: #{datos['centro_id']} {datos['centro_nombre']})")
+    if datos["extra_ausencias"]:
+        ext = datos["extra_ausencias"]
+        print("---------------------------------------------------------")
+        print("ESCENARIOS DE HISTORIAL Y AUSENCIAS CARGADOS:")
+        print(f" - Estudio #{ext['estudio_asistido_id']}: turno Asistido (con muestra)")
+        print(f" - Estudio #{ext['estudio_vencido_1_id']}: turno vencido #{ext['turno_vencido_1_id']} (0->1 ausencia)")
+        print(f" - Estudio #{ext['estudio_vencido_5_id']}: turno vencido #{ext['turno_vencido_5_id']} (4->5 ausencia, anula pago)")
+        print("Ejecuta: poetry run flask --app main procesar-ausencias")
     print("=========================================================")
 
 

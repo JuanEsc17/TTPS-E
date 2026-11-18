@@ -24,6 +24,10 @@ export function listarMisEstudiosRequest(token) {
     return requestJson("/api/v1/turnos/mis-estudios", { token });
 }
 
+export function listarMisTurnosRequest(token) {
+    return requestJson("/api/v1/turnos/mis-turnos", { token });
+}
+
 export function listarCentrosRequest(token) {
     return requestJson("/api/v1/centros-extraccion", { token });
 }

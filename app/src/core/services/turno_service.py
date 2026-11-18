@@ -65,6 +65,20 @@ class TurnoService:
             or (estudio.estado == EstadoEstudio.TURNO_SACADO and estudio.ausencias < MAX_AUSENCIAS)
         )
 
+    @staticmethod
+    def _serializar_centro_dict(centro: CentroExtraccion | None) -> dict[str, Any] | None:
+        """Convierte un CentroExtraccion a diccionario plano."""
+        if not centro:
+            return None
+        return {
+            "id": centro.id,
+            "nombre": centro.nombre,
+            "direccion": centro.direccion,
+            "provincia": centro.provincia,
+            "latitud": centro.latitud,
+            "longitud": centro.longitud,
+        }
+
     @classmethod
     def listar_estudios_paciente(cls, usuario_actual_id: int) -> list[dict[str, Any]]:
         """Lista los estudios del paciente titular con su habilitacion y turno activo."""
@@ -93,22 +107,69 @@ class TurnoService:
                             "duracion_minutos": DURACION_SLOT_MINUTOS,
                             "ausencias_acumuladas": e.ausencias,
                             "max_ausencias": MAX_AUSENCIAS,
-                            "centro": (
-                                {
-                                    "id": turno_activo.centro.id,
-                                    "nombre": turno_activo.centro.nombre,
-                                    "direccion": turno_activo.centro.direccion,
-                                    "provincia": turno_activo.centro.provincia,
-                                    "latitud": turno_activo.centro.latitud,
-                                    "longitud": turno_activo.centro.longitud,
-                                }
-                                if turno_activo.centro
-                                else None
-                            ),
+                            "centro": cls._serializar_centro_dict(turno_activo.centro),
                         }
                         if turno_activo
                         else None
                     ),
+                }
+            )
+        return resultado
+
+    @classmethod
+    def listar_turnos_paciente(cls, usuario_actual_id: int) -> list[dict[str, Any]]:
+        """Lista todos los turnos (activos e historicos) del paciente con sus detalles."""
+        turnos = TurnoRepo.listar_turnos_de_usuario(usuario_actual_id)
+        resultado: list[dict[str, Any]] = []
+        for t in turnos:
+            estudio = t.estudio
+            muestra_turno = (
+                next((m for m in estudio.muestras if m.turno_id == t.id), None)
+                if estudio
+                else None
+            )
+
+            if t.asistio is True or muestra_turno is not None:
+                estado_turno = "Asistido"
+            elif not t.activo and t.asistio is False:
+                estado_turno = "Ausente"
+            elif not t.activo:
+                estado_turno = "Cancelado"
+            else:
+                estado_turno = "Confirmado"
+
+            puede_cancelar = bool(
+                t.activo
+                and t.asistio is None
+                and estudio is not None
+                and estudio.estado == EstadoEstudio.TURNO_SACADO
+                and muestra_turno is None
+            )
+
+            resultado.append(
+                {
+                    "turno_id": t.id,
+                    "estudio_id": t.estudio_id,
+                    "estado_estudio": estudio.estado.value if estudio else None,
+                    "patologia": (
+                        estudio.patologia_sospechada.nombre
+                        if (estudio and estudio.patologia_sospechada)
+                        else None
+                    ),
+                    "ausencias_estudio": estudio.ausencias if estudio else 0,
+                    "max_ausencias": MAX_AUSENCIAS,
+                    "inicio": t.inicio.isoformat(),
+                    "duracion_minutos": DURACION_SLOT_MINUTOS,
+                    "activo": t.activo,
+                    "asistio": t.asistio,
+                    "estado_turno": estado_turno,
+                    "puede_cancelar": puede_cancelar,
+                    "muestra_tomada_en": (
+                        muestra_turno.tomada_en.isoformat()
+                        if (muestra_turno and muestra_turno.tomada_en)
+                        else None
+                    ),
+                    "centro": cls._serializar_centro_dict(t.centro),
                 }
             )
         return resultado

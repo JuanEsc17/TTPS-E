@@ -41,6 +41,22 @@ class TurnoRepo:
         return list(db.session.execute(stmt).unique().scalars().all())
 
     @staticmethod
+    def listar_turnos_de_usuario(usuario_id: int) -> list[Turno]:
+        """Retorna el historial completo de turnos del paciente vinculado a usuario_id."""
+        stmt = (
+            select(Turno)
+            .join(Turno.paciente)
+            .options(
+                joinedload(Turno.centro),
+                joinedload(Turno.estudio).joinedload(Estudio.patologia_sospechada),
+                joinedload(Turno.estudio).selectinload(Estudio.muestras),
+            )
+            .where(Paciente.usuario_id == usuario_id)
+            .order_by(Turno.inicio.desc(), Turno.id.desc())
+        )
+        return list(db.session.execute(stmt).unique().scalars().all())
+
+    @staticmethod
     def obtener_centro_por_id(centro_id: int) -> CentroExtraccion | None:
         """Busca un centro de extraccion por su ID."""
         return db.session.get(CentroExtraccion, centro_id)

@@ -358,3 +358,52 @@ def test_cancelar_turno_ya_cancelado_o_procesado_retorna_409(
     session.commit()
     res_muestra = client.post(f"/api/v1/turnos/{turno.id}/cancelar", headers=headers_pac)
     assert res_muestra.status_code == 409
+
+
+def test_listar_mis_turnos_historial_y_estados(app, client, session, datos_cancelacion):
+    """El paciente ve su historial completo de turnos (Confirmado, Cancelado, Ausente) con permisos."""
+    turno_actual = datos_cancelacion["turno"]
+    estudio = datos_cancelacion["estudio"]
+    centro = datos_cancelacion["centro"]
+    headers_pac = _auth_header_para(app, datos_cancelacion["usuario_paciente"])
+    headers_otro = _auth_header_para(app, datos_cancelacion["usuario_otro"])
+    headers_med = _auth_header_para(app, datos_cancelacion["usuario_medico"])
+
+    # Rol no paciente -> 403; otro paciente -> lista vacia
+    assert client.get("/api/v1/turnos/mis-turnos", headers=headers_med).status_code == 403
+    res_otro = client.get("/api/v1/turnos/mis-turnos", headers=headers_otro)
+    assert res_otro.status_code == 200
+    assert res_otro.get_json()["data"] == []
+
+    # Agregamos un turno previo marcado como ausente en el historial
+    turno_ausente = Turno(
+        centro_id=centro.id,
+        paciente_id=datos_cancelacion["paciente"].id,
+        estudio_id=estudio.id,
+        inicio=datos_cancelacion["inicio"] - timedelta(days=3),
+        activo=False,
+        asistio=False,
+    )
+    session.add(turno_ausente)
+    session.commit()
+
+    # Antes de cancelar el turno activo
+    res_antes = client.get("/api/v1/turnos/mis-turnos", headers=headers_pac)
+    assert res_antes.status_code == 200
+    items = res_antes.get_json()["data"]
+    assert len(items) == 2
+    assert items[0]["turno_id"] == turno_actual.id
+    assert items[0]["estado_turno"] == "Confirmado"
+    assert items[0]["puede_cancelar"] is True
+    assert items[0]["centro"]["nombre"] == centro.nombre
+
+    assert items[1]["turno_id"] == turno_ausente.id
+    assert items[1]["estado_turno"] == "Ausente"
+    assert items[1]["puede_cancelar"] is False
+
+    # Cancelar turno actual y verificar que pasa a Cancelado en el historial
+    assert client.post(f"/api/v1/turnos/{turno_actual.id}/cancelar", headers=headers_pac).status_code == 200
+    res_despues = client.get("/api/v1/turnos/mis-turnos", headers=headers_pac)
+    items_despues = res_despues.get_json()["data"]
+    assert items_despues[0]["estado_turno"] == "Cancelado"
+    assert items_despues[0]["puede_cancelar"] is False

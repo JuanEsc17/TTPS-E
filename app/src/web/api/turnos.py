@@ -25,6 +25,14 @@ def listar_mis_estudios_para_turno() -> tuple[Any, int]:
     return jsonify({"ok": True, "data": estudios}), 200
 
 
+@turnos_bp.get("/turnos/mis-turnos")
+@requiere_sesion(roles=[Rol.PACIENTE])
+def listar_mis_turnos() -> tuple[Any, int]:
+    """Retorna el historial completo de turnos del paciente autenticado."""
+    turnos = TurnoService.listar_turnos_paciente(g.usuario_actual.id)
+    return jsonify({"ok": True, "data": turnos}), 200
+
+
 @turnos_bp.get("/centros-extraccion")
 @requiere_sesion()
 def listar_centros() -> tuple[Any, int]:

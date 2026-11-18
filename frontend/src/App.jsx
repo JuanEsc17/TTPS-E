@@ -13,6 +13,7 @@ import ChatbotPage from "./pages/ChatbotPage";
 import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
 import PatologiasPage from "./pages/PatologiasPage";
 import SolicitarTurnoPage from "./pages/SolicitarTurnoPage";
+import MisTurnosPage from "./pages/MisTurnosPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -107,6 +108,10 @@ export default function App() {
           <Route
             path="/paciente/estudios/:estudioId/turno"
             element={<SolicitarTurnoPage sesion={sesion} />}
+          />
+          <Route
+            path="/paciente/mis-turnos"
+            element={<MisTurnosPage sesion={sesion} />}
           />
           <Route
             path="/transporte/orden-del-dia"

@@ -348,9 +348,10 @@ def test_solicitar_turno_colision_mismo_horario_retorna_409(
 @pytest.mark.parametrize(
     ("estado", "ausencias", "con_pago_anulado"),
     [
-        (EstadoEstudio.CREADO, 0, False),        # Creado sin pago
-        (EstadoEstudio.CREADO, 0, True),         # Creado con pago anulado
-        (EstadoEstudio.TURNO_SACADO, 5, False),  # Alcanzo limite de 5 ausencias
+        (EstadoEstudio.CREADO, 0, False),             # Creado sin pago
+        (EstadoEstudio.CREADO, 0, True),              # Creado con pago anulado
+        (EstadoEstudio.TURNO_SACADO, 5, False),       # Alcanzo limite de 5 ausencias
+        (EstadoEstudio.LISTA_PARA_RETIRAR, 0, False), # Ya tiene muestra tomada
     ],
 )
 def test_solicitar_turno_estudio_no_habilitado_retorna_409(

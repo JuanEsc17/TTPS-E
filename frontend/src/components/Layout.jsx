@@ -6,7 +6,8 @@ import LogoAdn from "./LogoAdn";
 const MENU_POR_ROL = {
     paciente: [
         { to: "/paciente/estudios", label: "Mis estudios" },
-        { to: "/paciente/turno", label: "Turno de extracción" },
+        { to: "/paciente/turno", label: "Sacar turno" },
+        { to: "/paciente/mis-turnos", label: "Mis turnos" },
         { to: "/chatbot", label: "Asistente de patologías" },
     ],
     medico: [

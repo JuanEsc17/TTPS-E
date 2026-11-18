@@ -183,10 +183,18 @@ export default function SolicitarTurnoPage({ sesion }) {
     );
 
     const turnoActivo = estudioActual?.turno_activo || null;
+    const puedeReservarEstudio = Boolean(estudioActual?.habilitado_para_turno && !turnoActivo);
 
-    // Cargar disponibilidad cuando cambia el centro o la fecha (y no hay turno activo)
+    // Cargar disponibilidad cuando cambia el centro o la fecha (y el estudio admite reserva)
     useEffect(() => {
-        if (!token || !esPaciente || !centroSeleccionadoId || !fechaSeleccionada || turnoActivo) {
+        if (
+            !token ||
+            !esPaciente ||
+            !centroSeleccionadoId ||
+            !fechaSeleccionada ||
+            turnoActivo ||
+            !puedeReservarEstudio
+        ) {
             return;
         }
         let cancelado = false;
@@ -221,7 +229,7 @@ export default function SolicitarTurnoPage({ sesion }) {
         return () => {
             cancelado = true;
         };
-    }, [token, esPaciente, centroSeleccionadoId, fechaSeleccionada, turnoActivo]);
+    }, [token, esPaciente, centroSeleccionadoId, fechaSeleccionada, turnoActivo, puedeReservarEstudio]);
 
     const centrosFiltrados = useMemo(() => {
         const q = busquedaCentro.trim().toLowerCase();
@@ -378,12 +386,20 @@ export default function SolicitarTurnoPage({ sesion }) {
                     </li>
                 </ol>
 
-                <Link
-                    to="/paciente/estudios"
-                    className="text-xs font-semibold text-[#0B4F8A] hover:underline"
-                >
-                    ← Volver a mis estudios
-                </Link>
+                <div className="flex items-center gap-4">
+                    <Link
+                        to="/paciente/mis-turnos"
+                        className="text-xs font-semibold text-[#0B4F8A] hover:underline"
+                    >
+                        Ver mis turnos e historial →
+                    </Link>
+                    <Link
+                        to="/paciente/estudios"
+                        className="text-xs font-semibold text-slate-600 hover:text-[#0B4F8A] hover:underline"
+                    >
+                        ← Mis estudios
+                    </Link>
+                </div>
             </div>
 
             {/* Encabezado principal */}
@@ -482,6 +498,39 @@ export default function SolicitarTurnoPage({ sesion }) {
                     )}
                 </div>
             )}
+
+            {estudioActual &&
+                !cargandoInicial &&
+                estudioActual.ausencias >= (estudioActual.max_ausencias || 5) - 2 && (
+                    <div
+                        className={`rounded-xl border px-4 py-3 text-xs ${
+                            estudioActual.ausencias >= (estudioActual.max_ausencias || 5)
+                                ? "border-red-200 bg-red-50 text-red-900"
+                                : "border-amber-300 bg-amber-50 text-amber-900"
+                        }`}
+                        role="alert"
+                    >
+                        {estudioActual.ausencias >= (estudioActual.max_ausencias || 5) ? (
+                            <p>
+                                <strong>Límite de {estudioActual.max_ausencias || 5} ausencias alcanzado:</strong>{" "}
+                                el pago del Estudio #{estudioActual.estudio_id} fue anulado. Deberás abonarlo nuevamente para poder reservar otro turno.
+                            </p>
+                        ) : (
+                            <p>
+                                <strong>¡Atención con tus inasistencias!</strong> El Estudio #{estudioActual.estudio_id} acumula{" "}
+                                <strong>
+                                    {estudioActual.ausencias} de {estudioActual.max_ausencias || 5} ausencias
+                                </strong>
+                                . Te queda{" "}
+                                <strong>
+                                    {(estudioActual.max_ausencias || 5) - estudioActual.ausencias} oportunidad
+                                    {(estudioActual.max_ausencias || 5) - estudioActual.ausencias === 1 ? "" : "es"}
+                                </strong>{" "}
+                                antes de perder el pago.
+                            </p>
+                        )}
+                    </div>
+                )}
 
             {error && (
                 <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
@@ -629,6 +678,26 @@ export default function SolicitarTurnoPage({ sesion }) {
                                 )}
                             </div>
                         </div>
+                    </div>
+                </section>
+            ) : !puedeReservar ? (
+                <section className="rounded-2xl border border-amber-200 bg-amber-50/80 p-8 text-center">
+                    <h2 className="text-base font-semibold text-amber-950">
+                        El Estudio #{estudioActual.estudio_id} no admite reserva de turno en este estado
+                    </h2>
+                    <p className="mt-1.5 text-sm text-amber-900">
+                        Estado actual: <strong>{estudioActual.estado}</strong>.{" "}
+                        {estudioActual.estado === "Creado"
+                            ? "Debe contar con un pago vigente o autorización de obra social para poder agendar la extracción."
+                            : "Este estudio ya cuenta con una muestra tomada o continúa su circuito clínico, por lo que no permite sacar un nuevo turno."}
+                    </p>
+                    <div className="mt-4">
+                        <Link
+                            to="/paciente/mis-turnos"
+                            className="inline-flex items-center rounded-xl bg-[#0B4F8A] px-4 py-2 text-xs font-semibold text-white hover:bg-[#093E6D]"
+                        >
+                            Ver mis turnos e historial →
+                        </Link>
                     </div>
                 </section>
             ) : (
