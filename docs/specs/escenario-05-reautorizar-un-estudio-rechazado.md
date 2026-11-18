@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 5 – Reautorizar un estudio rechazado
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-5`
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Paciente`, `Administrativo` |
-| **Objetos** | `Estudio`, `Obra social`, `Demanda`, `Presupuesto`, `Aviso` |
-| **Verbos** | `Sacar turno` *(habilitado tras la nueva autorización)* |
+| **Objetos** | `Estudio`, `Obra social`, `Demanda`, `Presupuesto`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Sacar turno`, `Registrar modificación` *(habilitado tras la nueva autorización)* |
 | **Estados** | `Rechazado`, `Pendiente de autorización`, `Autorizado` |
 
 ---
@@ -105,7 +105,7 @@
    - `resultado = ResultadoAutorizacion.PENDIENTE`
    - `demanda_id = demanda.id`
    - `registrada_por_id = None`
-4. Actualiza `estudio.estado = EstadoEstudio.PENDIENTE_AUTORIZACION` (`"Pendiente de autorizacion"`), cumpliendo con el LEL (`Estado: Rechazado -> El paciente carga una demanda y pide la reautorización. El estudio vuelve a Pendiente de autorización`).
+4. Actualiza `estudio.estado = EstadoEstudio.PENDIENTE_AUTORIZACION` (`"Pendiente de autorizacion"`), cumpliendo con el LEL (`Estado: Rechazado -> El paciente carga una demanda y pide la reautorización. El estudio vuelve a Pendiente de autorización`), y registra el cambio en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`).
 5. Inserta un `Aviso` en `avisos` para los usuarios con `Rol.ADMINISTRATIVO` (`"El paciente del estudio #<id> cargó una demanda judicial favorable. Solicitar reautorización."`).
 6. Ejecuta `session.commit()` y devuelve `201 Created` al `Paciente`.
 **Timeout**: `5s`
@@ -132,8 +132,8 @@
    - `resultado = ResultadoAutorizacion.AUTORIZADA`
    - `registrada_por_id = usuario_actual.id`
    - `fecha = func.now()`
-5. Cambia `estudio.estado = EstadoEstudio.AUTORIZADO` (`"Autorizado"`).
-6. Inserta el registro financiero en `pagos` (`presupuesto_id = estudio.presupuesto.id`, `tipo = TipoPago.OBRA_SOCIAL`, `monto_usd`, `cobertura_obra_social_usd`, `anulado = False`).
+5. Cambia `estudio.estado = EstadoEstudio.AUTORIZADO` (`"Autorizado"`) y registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `usuario_id = usuario_actual.id`).
+6. Inserta el registro financiero en `pagos` (`presupuesto_id = estudio.presupuesto.id`, `tipo = TipoPago.OBRA_SOCIAL`, `medio_pago = MedioPago.OBRA_SOCIAL`, `estado = EstadoPago.PAGADO`, `cantidad_cuotas = 1`, `monto_usd`, `cobertura_obra_social_usd`, `anulado = False`).
 7. Crea un `Aviso` y envía correo al `Paciente` informando que su `Estudio` fue reautorizado y ya puede `Sacar turno`.
 8. Ejecuta `session.commit()`.
 **Timeout**: `5s`
@@ -310,3 +310,4 @@
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/economia.py` y `estudios.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Actualizada para registrar transiciones de `Estudio` en `registro_modificaciones` y compatibilidad con campos `Pago` de MercadoPago/cuotas. | Actualizada a v1.1. |

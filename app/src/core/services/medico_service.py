@@ -10,6 +10,7 @@ from src.core.services.seguridad import (
 )
 
 _REGEX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_REGEX_TELEFONO = re.compile(r"^\+?[\d\s\-()]{7,20}$")
 
 
 def listar_especialidades() -> list[dict]:
@@ -44,6 +45,14 @@ def _validar_datos_medico(
     if not _REGEX_EMAIL.match(email_limpio):
         raise ErrorDominio(
             "El formato del correo electronico es invalido.",
+            codigo="DATOS_MEDICO_INVALIDOS",
+            http_status=400,
+        )
+
+    digitos_telefono = sum(c.isdigit() for c in telefono_limpio)
+    if not _REGEX_TELEFONO.match(telefono_limpio) or digitos_telefono < 7:
+        raise ErrorDominio(
+            "El teléfono ingresado no es válido. Debe contener al menos 7 dígitos.",
             codigo="DATOS_MEDICO_INVALIDOS",
             http_status=400,
         )

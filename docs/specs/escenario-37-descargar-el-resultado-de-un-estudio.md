@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 37 – Descargar el resultado de un estudio
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-37`
 
@@ -12,11 +12,13 @@
 | **Sujetos** | **Paciente** | `Usuario` (`rol = Rol.PACIENTE`) + `Paciente` (`pacientes.id`, titular del `Estudio`) |
 | **Sujetos** | **Médico** | `Usuario` (`rol = Rol.MEDICO` o `Rol.GERENTE_MEDICO`) + `Medico` (`medicos.id`, médico tratante del `Estudio`) |
 | **Sujetos** | **Bioinformático** | `Usuario` (`rol = Rol.BIOINFORMATICO`, quien cargó previamente las **variantes** generando el **resultado**) |
-| **Objetos** | **Resultado** | Modelo `Resultado` (`resultados`: `id`, `analisis_id`, `positivo`, `pdf_path`, `generado_en`) y función `calcular_positivo(variantes)` en `app/src/core/models/analisis.py` |
-| **Objetos** | **Estudio** | Modelo `Estudio` (`estudios`: `id`, `paciente_id`, `medico_id`, `estado`, relación `analisis`) |
+| **Objetos** | **Resultado** | Modelo `Resultado` (`resultados`: `id`, `analisis_id`, `positivo`, `diagnostico`, `fecha_proximo_estudio`, `pdf_path`, `generado_en`) |
+| **Objetos** | **Estudio** | Modelo `Estudio` (`estudios`: `id`, `paciente_id`, `medico_id`, `estado`, `fecha_reevaluacion_vus`, relación `analisis`) |
 | **Objetos** | **Variante** | Modelo `Variante` (`variantes`: `id`, `gen_id`, `notacion`, `clinvar_id`, `clasificacion: ClasificacionVariante`) y `AnalisisVariante` (`analisis_variantes`) |
 | **Objetos** | **Gen** | Modelo `Gen` (`genes`: `id`, `simbolo`, `nombre`, `es_hallazgo_secundario`) y `AnalisisGen` (`analisis_genes`) |
-| **Objetos** | **VUS** | `ClasificacionVariante.VUS` (`"vus"`) en `app/src/core/models/enums.py` |
+| **Objetos** | **VUS** | `ClasificacionVariante.VUS` y `ConclusionDiagnostica.VUS` (incluye fecha de próximo estudio a 1 año, Escenario 43) |
+| **Objetos** | **Autorización de historia clínica** | `PacienteMedicoAutorizado` (`pacientes_medicos_autorizados`) |
+| **Objetos** | **Vínculo de estudios familiares** | `EstudioFamiliarVinculado` (`estudios_familiares_vinculados`, acceso desde estudio vinculado X -> X') |
 | **Objetos** | **Aviso** | Modelo `Aviso` (`avisos`: notificaciones por `CanalAviso.MAIL` y `CanalAviso.APP` al **paciente** y al **médico**) |
 | **Verbos** | **Descargar resultado** | Consultar el detalle del **resultado** (positividad/negatividad y **variantes**) y bajar el archivo PDF desde el sistema |
 | **Verbos** | **Cargar resultado** | Paso inmediatamente anterior que dejó al **estudio** en **Resultado cargado** y disparó los avisos |
@@ -105,11 +107,14 @@
 **Action**:
   1. Verifica la sesión activa y comprueba el control de acceso estricto sobre datos genéticos:
      - Si `usuario.rol == Rol.PACIENTE`: debe cumplirse `estudio.paciente.usuario_id == usuario.id`.
-     - Si `usuario.rol in (Rol.MEDICO, Rol.GERENTE_MEDICO)`: debe cumplirse `estudio.medico.usuario_id == usuario.id`.
+     - Si `usuario.rol in (Rol.MEDICO, Rol.GERENTE_MEDICO)`: debe cumplirse alguna de las siguientes condiciones:
+       1. `estudio.medico.usuario_id == usuario.id`, **o**
+       2. existe autorización vigente en `pacientes_medicos_autorizados` (`paciente_id == estudio.paciente_id AND medico_id == medico.id AND activa == True`, Escenario 40), **o**
+       3. consulta a través de un estudio origen `X` propio/autorizado conectado en `estudios_familiares_vinculados` (`origen_estudio_id` verificado, Escenario 41).
      - Cualquier otro usuario o rol recibe `403 Forbidden`.
   2. Verifica que `estudio.estado == EstadoEstudio.RESULTADO_CARGADO` y que exista un `Analisis` con `Resultado` asociado (tomando el último elemento de `estudio.analisis` que posea `resultado is not None`, contemplando también el historial en caso de reanálisis).
-  3. Marca como leídos (`Aviso.leido = True`) los avisos pendientes de ese estudio para el usuario que consulta.
-  4. Devuelve la estructura del `Resultado` (`positivo`, `generado_en`, `tipo_analisis`) junto con las **variantes** asociadas (`Variante.notacion`, `Variante.clasificacion`, `Variante.clinvar_id`, `Gen.simbolo`, `Gen.nombre`, `Gen.es_hallazgo_secundario`).
+  3. Marca como leídos (`Aviso.leido = True`) los avisos pendientes de ese estudio para el usuario que consulta (salvo consulta delegada por vínculo familiar de otro paciente).
+  4. Devuelve la estructura del `Resultado` (`positivo`, `diagnostico`, `fecha_proximo_estudio`, `generado_en`, `tipo_analisis`, más `estudio.fecha_reevaluacion_vus` si corresponde) junto con las **variantes** asociadas (`Variante.notacion`, `Variante.clasificacion`, `Variante.clinvar_id`, `Gen.simbolo`, `Gen.nombre`, `Gen.es_hallazgo_secundario`).
 **Timeout**: `2s`
 **Input**: `{ estudio_id: 88, usuario_autenticado_id: 52, rol: "Rol.PACIENTE" }`
 **Output on SUCCESS**: Datos estructurados del `Resultado` y lista de `Variante` -> GO TO STEP 3
@@ -120,7 +125,7 @@
   - `FAILURE(not_found)`: `estudio_id` inexistente -> retornar `404 Not Found`.
 
 **Observable states during this step**:
-  - Customer/Actor (**Paciente** / **Médico**) sees: Pantalla de detalle del **resultado** mostrando claramente si el diagnóstico fue **Positivo** (`positivo == True`, cuando alguna variante es `patogenica`) o **Negativo** (`positivo == False`), la tabla de **variantes** encontradas en cada **gen** con su clasificación (`patogenica`, `benigna`, `inocua`, `vus`) y el botón "Descargar PDF".
+  - Customer/Actor (**Paciente** / **Médico**) sees: Pantalla de detalle del **resultado** mostrando claramente si el diagnóstico fue **Positivo** (`diagnostico == 'positivo'`), **Negativo** (`diagnostico == 'negativo'`) o **VUS** (`diagnostico == 'vus'`, con la fecha programada dentro de un año en `fecha_proximo_estudio`), la tabla de **variantes** encontradas en cada **gen** con su clasificación (`patogenica`, `benigna`, `inocua`, `vus`), accesos directos a estudios familiares vinculados (para el **Médico**, Escenario 41) y el botón "Descargar PDF".
   - Operator sees: Acceso auditado a `GET /api/estudios/88/resultado`.
   - Database:
     - Lectura (`SELECT`) sobre `estudios`, `analisis`, `resultados`, `analisis_variantes`, `variantes` y `genes`.
@@ -194,10 +199,13 @@ Aviso (avisos):
   "data": {
     "estudio_id": 88,
     "estado_estudio": "Resultado cargado",
+    "fecha_reevaluacion_vus": null,
     "analisis_id": 12,
     "tipo_analisis": "inicial",
     "resultado_id": 19,
     "positivo": true,
+    "diagnostico": "positivo",
+    "fecha_proximo_estudio": null,
     "generado_en": "2026-10-28T18:40:00Z",
     "patologia_sospechada": {
       "id": 1,
@@ -295,7 +303,8 @@ Aviso (avisos):
 | `TC-01`: Happy path – Notificación por mail y aviso al paciente y al médico | El estudio pasa a `EstadoEstudio.RESULTADO_CARGADO` | Se crean los registros en `avisos` (`CanalAviso.APP` y `CanalAviso.MAIL`) para `paciente.usuario_id` y `medico.usuario_id` con `enviado=True`. |
 | `TC-02`: Happy path – El paciente consulta y descarga el PDF de su resultado positivo | `GET /api/estudios/{id}/resultado` y `GET /api/estudios/{id}/resultado/pdf` por el paciente titular | El primer endpoint retorna `200 OK` con `positivo=True` (cuando hay variante `PATOGENICA`) y la lista de variantes; el segundo retorna `200 OK` con `Content-Type: application/pdf` y bytes `%PDF-`. |
 | `TC-03`: Happy path – El médico tratante consulta y descarga el resultado de su paciente | `GET /api/estudios/{id}/resultado` y `GET /api/estudios/{id}/resultado/pdf` por el médico de `estudio.medico_id` | Ambos endpoints retornan `200 OK` con el detalle de variantes y el PDF. |
-| `TC-04`: Resultado negativo cuando las variantes son benignas, inocuas o VUS | Estudio en `RESULTADO_CARGADO` con variantes de clasificación `BENIGNA` y `VUS` (sin ninguna `PATOGENICA`) | `calcular_positivo` es `False`; `GET /api/estudios/{id}/resultado` retorna `positivo=False` junto con las variantes halladas. |
+| `TC-04`: Resultado **VUS** (sin variante patogénica) incluye diagnóstico `'vus'` y fecha a un año | Estudio en `RESULTADO_CARGADO` con variante `VUS` (sin ninguna `PATOGENICA`) | `positivo=False`, `diagnostico='vus'`, `fecha_proximo_estudio == fecha_generado + 1 año` y `estudio.fecha_reevaluacion_vus` poblada en respuesta JSON y PDF. |
+| `TC-04b`: Acceso del médico al resultado de un familiar desde estudio vinculado `X` (Esc. 41) | `GET /api/estudios/{X}/familiares-vinculados/{X_prima}` y descarga PDF asociada | Retorna `200 OK` cuando existe `(X, X')` en `estudios_familiares_vinculados` y el médico está autorizado sobre `X`. |
 | `TC-05`: Rechazo de seguridad cuando otro paciente intenta acceder o descargar el resultado | `GET /api/estudios/{id}/resultado` o `/pdf` autenticado como un paciente distinto de `estudio.paciente_id` | Retorna `403 Forbidden` (`ACCESO_RESULTADO_DENEGADO`). |
 | `TC-06`: Rechazo cuando otro médico que no es el médico tratante intenta descargar el resultado | `GET /api/estudios/{id}/resultado/pdf` autenticado como un médico distinto de `estudio.medico_id` | Retorna `403 Forbidden` (`ACCESO_RESULTADO_DENEGADO`). |
 | `TC-07`: Rechazo cuando el estudio aún no tiene resultado cargado | `GET /api/estudios/{id}/resultado` sobre un estudio en `EstadoEstudio.EN_ANALISIS_BIOINFORMATICO` o `EN_VIAJE_COREA` | Retorna `409 Conflict` (`RESULTADO_AUN_NO_DISPONIBLE`). |
@@ -318,3 +327,4 @@ Aviso (avisos):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada verificando `Estudio`, `Analisis`, `AnalisisVariante`, `Variante`, `Resultado`, `calcular_positivo` y `Aviso` en `app/src/core/models/`. | Aprobada. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 2, 4 y 7 (ADR-002/ADR-004): exposición de `diagnostico` (`positivo`, `negativo`, `vus`) y `fecha_proximo_estudio` (+1 año si VUS), y extensión de permisos de lectura/descarga para médicos autorizados y vínculos familiares verificados. | Especificación actualizada. |

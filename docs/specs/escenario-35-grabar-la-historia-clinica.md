@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 35 – Grabar la historia clínica
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-35`
 
@@ -12,8 +12,11 @@
 | **Sujetos** | **Médico** | `Usuario` (`rol = Rol.MEDICO` o `Rol.GERENTE_MEDICO`) + perfil `Medico` (`medicos.id`, médico tratante) |
 | **Sujetos** | **Paciente** | Modelo `Paciente` (`pacientes`: destinatario de la **historia clínica**) |
 | **Objetos** | **Historia clínica** | Columna `Paciente.historia_clinica: Mapped[str] = mapped_column(Text)` en la tabla `pacientes` |
+| **Objetos** | **Autorización de historia clínica** | Tabla `pacientes_medicos_autorizados` (`activa == True`) que habilita a múltiples **médicos** autorizados por el **paciente** (Req. 2) |
 | **Objetos** | **Transcriptor de audio** | Cliente HTTP/servicio externo ASR (`app/src/clients/transcriptor_client.py`) que convierte la grabación de voz del **médico** en texto |
+| **Objetos** | **Registro de modificaciones** | Tabla inmutable `registro_modificaciones` que audita actualizaciones sobre `pacientes.historia_clinica` (Req. 6) |
 | **Verbos** | **Grabar historia clínica** | Dictar la **historia clínica** del **paciente**, transcribirla a texto y guardarla |
+| **Verbos** | **Registrar modificación** | Registrar valor anterior y nuevo de `historia_clinica` en `registro_modificaciones` |
 | **Verbos** | **Dar de alta paciente** | Flujo contenedor en el que el **médico** registra al **paciente** con su **historia clínica** obligatoria |
 | **Estados** | *(No altera `EstadoEstudio`)* | Ocurre durante el alta o actualización clínica del **paciente** |
 
@@ -54,7 +57,7 @@
 - **Sesión y Rol:** El usuario autenticado debe poseer una sesión activa válida con `Usuario.rol in (Rol.MEDICO, Rol.GERENTE_MEDICO)` y contar con perfil `Medico` en la tabla `medicos`.
 - **Datos existentes en `app/src/core/models/`:**
   - Existe el registro del **médico** en `medicos`.
-  - Si se actualiza un **paciente** ya registrado (`paciente_id` provisto), debe existir la fila en `pacientes` con `pacientes.medico_id == medico.id`.
+  - Si se actualiza un **paciente** ya registrado (`paciente_id` provisto), debe existir la fila en `pacientes` y el **médico** debe contar con autorización vigente en `pacientes_medicos_autorizados` (`paciente_id == paciente.id AND medico_id == medico.id AND activa == True`) o ser el médico de alta (`pacientes.medico_id == medico.id` en compatibilidad transitoria).
 - **Estado previo del `Estudio`:** No aplica (`N/A`).
 - **Servicios externos:** El módulo **transcriptor de audio** debe estar configurado en `TRANSCRIPTOR_API_BASE_URL` y accesible.
 
@@ -77,7 +80,7 @@
   1. Verifica que el usuario autenticado tenga `Rol.MEDICO` o `Rol.GERENTE_MEDICO`.
   2. Comprueba que la petición `multipart/form-data` contenga el archivo `audio` no vacío (`size > 0` y `size <= 15 MB`).
   3. Valida que el tipo MIME o cabecera del archivo sea un formato de audio soportado (`audio/webm`, `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/ogg`).
-  4. Si se incluyó `paciente_id`, verifica en `paciente_repo` que el `Paciente` exista y pertenezca al **médico** (`paciente.medico_id == medico.id`).
+  4. Si se incluyó `paciente_id`, verifica en `paciente_repo` que el `Paciente` exista y que el **médico** posea **autorización de historia clínica** vigente (`pacientes_medicos_autorizados.activa == True`, con respaldo en `paciente.medico_id == medico.id`).
 **Timeout**: `2s`
 **Input**:
 ```json
@@ -130,8 +133,9 @@
 **Action**:
   1. Elimina de memoria/disco temporal cualquier copia del archivo de audio original.
   2. Si la petición incluye `paciente_id` (o cuando el **médico** confirma el formulario de alta de paciente `POST /api/pacientes` / actualización `PATCH /api/pacientes/{paciente_id}/historia-clinica`):
-     - Actualiza o inserta `pacientes.historia_clinica = texto_transcrito` en PostgreSQL y ejecuta `COMMIT`.
-  3. Si la transcripción se invocó durante la carga del formulario de un **paciente** aún no persistido (`paciente_id == None`), devuelve `texto_transcrito` para poblar el campo `historia_clinica` del formulario, el cual se persiste obligatoriamente en `pacientes.historia_clinica` al confirmar el alta del paciente.
+     - Actualiza o inserta `pacientes.historia_clinica = texto_transcrito` en PostgreSQL.
+     - Invoca `AuditoriaService.registrar_modificacion(...)` dentro de la misma transacción para insertar en `registro_modificaciones` (`entidad_tipo = 'paciente'`, `entidad_id = paciente.id`, `accion = 'modificacion'` en PATCH o `'creacion'` en alta, `usuario_id = medico.usuario_id`, `origen = 'usuario'`, `cambios = {"historia_clinica": {"anterior": valor_anterior, "nuevo": texto_transcrito}}`) y ejecuta `COMMIT`.
+  3. Si la transcripción se invocó durante la carga del formulario de un **paciente** aún no persistido (`paciente_id == None`), devuelve `texto_transcrito` para poblar el campo `historia_clinica` del formulario, el cual se persiste obligatoriamente en `pacientes.historia_clinica` (junto con el registro en `registro_modificaciones`) al confirmar el alta del paciente.
 **Timeout**: `3s`
 **Input**:
 ```json
@@ -299,3 +303,4 @@ Estudio (EstadoEstudio):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada verificando `Paciente.historia_clinica` en `app/src/core/models/perfiles.py` y el LEL. | Aprobada. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 2 y 6: autorización vía `pacientes_medicos_autorizados` y registro obligatorio en `registro_modificaciones` al actualizar `historia_clinica`. | Especificación actualizada (ver ADR-002 y ADR-003). |

@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 36 – Cargar los síntomas del paciente con SNOMED
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-36`
 
@@ -16,8 +16,11 @@
 | **Objetos** | **Patología** | Modelo `Patologia` (`patologias`: `id`, `nombre`, `descripcion`) |
 | **Objetos** | **Síntoma cardinal** | Fila en `PatologiaSintoma` (`patologias_sintomas`) con `es_cardinal == True` (índice único `uq_un_cardinal_por_patologia`) |
 | **Objetos** | **Síntoma secundario** | Fila en `PatologiaSintoma` (`patologias_sintomas`) con `es_cardinal == False` |
+| **Objetos** | **Autorización de historia clínica** | Fila inicial en `pacientes_medicos_autorizados` (`activa == True` para el médico que realiza el alta) |
+| **Objetos** | **Registro de modificaciones** | Registro inmutable en `registro_modificaciones` (`entidad_tipo = 'paciente'`, `accion = 'creacion'`) |
 | **Verbos** | **Cargar síntomas** | Buscar términos en **SNOMED** al escribir, seleccionarlos y validarlos contra la **patología** |
 | **Verbos** | **Dar de alta paciente** | Registrar al **paciente** solo si la lista de **síntomas** supera la validación contra la **patología** |
+| **Verbos** | **Registrar modificación** | Asentar el alta del **paciente** y sus síntomas iniciales en `registro_modificaciones` |
 | **Estados** | *(No altera `EstadoEstudio`)* | Condición bloqueante para el alta del **paciente** previa al alta de su **estudio** |
 
 ---
@@ -155,8 +158,10 @@
 **Actor**: Servicio (`paciente_service.py`) -> Repositorio (`paciente_repo.py`) -> PostgreSQL
 **Action**: Habiendo superado la validación clínica en `STEP 3` y las demás validaciones obligatorias del alta de **paciente** (DNI, nombre, apellido, teléfono, mail, fecha de nacimiento, historia clínica, tipo de sospecha):
   1. Inserta el `Usuario` (`rol = Rol.PACIENTE`, `debe_cambiar_password = True`) y el `Paciente` en `pacientes`.
-  2. Inserta en la tabla `pacientes_sintomas` una fila `(paciente_id = paciente.id, sintoma_id = s.id)` por cada **síntoma** seleccionado (deduplicando `sintoma_id`).
-  3. Ejecuta `COMMIT`.
+  2. Inserta la **autorización de historia clínica** inicial en `pacientes_medicos_autorizados` (`paciente_id = paciente.id`, `medico_id = medico.id`, `otorgada_por_usuario_id = medico.usuario_id`, `activa = True`).
+  3. Inserta en la tabla `pacientes_sintomas` una fila `(paciente_id = paciente.id, sintoma_id = s.id)` por cada **síntoma** seleccionado (deduplicando `sintoma_id`).
+  4. Asienta el alta del paciente en `registro_modificaciones` (`entidad_tipo = 'paciente'`, `entidad_id = paciente.id`, `accion = 'creacion'`, `usuario_id = medico.usuario_id`, `origen = 'usuario'`) sin exponer credenciales.
+  5. Ejecuta `COMMIT`.
 **Timeout**: `3s`
 **Input**: `{ paciente_data: dict, sintomas_ids: list[int] }`
 **Output on SUCCESS**: `{ paciente_id: int, sintomas_registrados: list[Sintoma] }` -> Retornar `201 Created` al **médico** (FIN DEL WORKFLOW).
@@ -375,3 +380,4 @@ Estudio (EstadoEstudio):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada verificando `Patologia`, `Sintoma`, `PatologiaSintoma` y `PacienteSintoma` en `app/src/core/models/clinica.py`. | Aprobada. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 2 y 6 (ADR-002/ADR-003): sembrado inicial en `pacientes_medicos_autorizados` y asiento de alta en `registro_modificaciones` al persistir el paciente con sus síntomas SNOMED. | Especificación actualizada. |

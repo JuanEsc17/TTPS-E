@@ -8,7 +8,11 @@ const MENU_POR_ROL = {
         { to: "/paciente/estudios", label: "Mis estudios" },
         { to: "/chatbot", label: "Asistente de patologías" },
     ],
-    medico: [{ to: "/medico/estudios", label: "Estudios" }],
+    medico: [
+        { to: "/medico/estudios", label: "Estudios" },
+        { to: "/medico/pacientes", label: "Pacientes" },
+        { to: "/medico/pacientes/nuevo", label: "Alta de paciente" },
+    ],
     gerente_medico: [{ to: "/gerencia/patologias", label: "Patologías" }],
     administrativo: [{ to: "/administracion/estudios", label: "Carga de datos ACTG" }],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],

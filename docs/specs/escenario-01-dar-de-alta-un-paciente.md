@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 1 – Dar de alta un paciente
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-1`
@@ -12,8 +12,8 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Médico` (sinónimos: médico tratante, médico derivante), `Gerente médico` (médico con facultades adicionales), `Paciente` |
-| **Objetos** | `Patología`, `Síntoma`, `Síntoma cardinal`, `Síntoma secundario`, `SNOMED`, `Historia clínica`, `Transcriptor de audio`, `Familiar`, `Familiograma`, `API de familiograma`, `Aviso` |
-| **Verbos** | `Dar de alta paciente`, `Cargar síntomas`, `Grabar historia clínica`, `Cambiar contraseña inicial` |
+| **Objetos** | `Patología`, `Síntoma`, `Síntoma cardinal`, `Síntoma secundario`, `SNOMED`, `Historia clínica`, `Transcriptor de audio`, `Familiar`, `Familiograma`, `API de familiograma`, `Autorización de historia clínica`, `Vínculo de estudios familiares`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Dar de alta paciente`, `Cargar síntomas`, `Grabar historia clínica`, `Cambiar contraseña inicial`, `Autorizar médico a historia clínica`, `Vincular estudios familiares`, `Registrar modificación` |
 | **Estados** | *(No aplica transición de `EstadoEstudio`; habilita el posterior `Dar de alta estudio` hacia `Creado`)* |
 
 ---
@@ -115,8 +115,10 @@ El `Médico` completa el formulario de alta de paciente en la vista de consulta 
 1. Genera una contraseña temporal aleatoria segura y calcula su `password_hash` (bcrypt/argon2).
 2. Inserta una fila en `usuarios` con `email`, `password_hash`, `rol = Rol.PACIENTE`, `nombre`, `apellido`, `telefono`, `debe_cambiar_password = True`.
 3. Inserta una fila en `pacientes` con `usuario_id = usuario.id`, `medico_id = medico.id`, `dni`, `fecha_nacimiento`, `diagnostico_presuntivo_id`, `historia_clinica`, `tipo_sospecha`, `familiograma_pdf_path = None`, `responsable_nombre`, `responsable_dni`.
-4. Inserta las filas correspondientes en `pacientes_sintomas` (`paciente_id`, `sintoma_id`).
-5. Si `input.familiares` no está vacío (Escenario 18), inserta cada fila en `familiares` (`paciente_id`, `parentesco`, `nombre`, `diagnostico_previo`) y sus síntomas en `familiares_sintomas` (`familiar_id`, `sintoma_id`). Si está vacío (Escenario 19), no inserta filas en `familiares`.
+4. Inserta la autorización inicial en `pacientes_medicos_autorizados` (`paciente_id = paciente.id`, `medico_id = medico.id`, `otorgada_por_usuario_id = usuario_actual.id`, `activa = True`), habilitando al médico derivante para consultar la `Historia clínica` (el `Paciente` podrá luego agregar más médicos en el Escenario 40).
+5. Inserta las filas correspondientes en `pacientes_sintomas` (`paciente_id`, `sintoma_id`).
+6. Si `input.familiares` no está vacío (Escenario 18), inserta cada fila en `familiares` (`paciente_id`, `parentesco`, `nombre`, `apellido`, `dni`, `paciente_vinculado_id`, `diagnostico_previo`) y sus síntomas en `familiares_sintomas` (`familiar_id`, `sintoma_id`). Si algún `familiar.dni` coincide con un `Paciente` ya existente, asigna `paciente_vinculado_id`. Asimismo, si el `dni` del nuevo `Paciente` coincide con registros previos en `familiares.dni` de otros pacientes, actualiza `familiares.paciente_vinculado_id = paciente.id`. Si está vacío (Escenario 19), no inserta filas en `familiares`.
+7. Registra el alta del `Paciente` en `registro_modificaciones` (`entidad_tipo = 'paciente'`, `entidad_id = paciente.id`, `accion = 'creacion'`, `usuario_id = usuario_actual.id`, `origen = 'usuario'`).
 **Timeout**: `5s`
 **Input**: `DatosAltaPacienteDTO`, `medico_id`, `password_temporal`
 **Output on SUCCESS**: `paciente.id`, `usuario.id` (en sesión transaccional pendiente de confirmación o recién confirmada) -> `GO TO STEP 4`
@@ -231,7 +233,9 @@ El `Médico` completa el formulario de alta de paciente en la vista de consulta 
   "familiares": [
     {
       "parentesco": "string — Ej. 'padre', 'madre', 'hermano', 'primo'",
-      "nombre": "string — Nombre completo del familiar",
+      "nombre": "string — Nombre del familiar",
+      "apellido": "string | null — Apellido del familiar",
+      "dni": "string | null — DNI del familiar (habilita vinculación automática de estudios)",
       "diagnostico_previo": "string | null — Diagnóstico previo si lo tiene",
       "sintomas_snomed_ids": [
         "string — Código SNOMED de síntomas del familiar"
@@ -392,3 +396,4 @@ El `Médico` completa el formulario de alta de paciente en la vista de consulta 
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/usuarios.py`, `perfiles.py` y `clinica.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Actualizada por Req. 2 (autorización inicial en `pacientes_medicos_autorizados`), Req. 4 (`dni` y vinculación automática en `familiares`) y Req. 6 (`registro_modificaciones`). | Actualizada a v1.1. |

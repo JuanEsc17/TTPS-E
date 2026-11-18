@@ -14,7 +14,9 @@ from .web.api.auth import auth_bp
 from .web.api.chatbot import chatbot_bp
 from .web.api.logistica import logistica_bp
 from .web.api.medicos import medicos_bp
+from .web.api.pacientes import pacientes_bp
 from .web.api.patologias import patologias_bp
+from .web.api.snomed import snomed_bp
 from .web.handlers.errors import registrar_manejadores_errores
 
 
@@ -64,12 +66,14 @@ def create_app(config: dict | None = None) -> Flask:
     db.init_app(app)
     registrar_manejadores_errores(app)
     app.register_blueprint(auth_bp)
-    app.register_blueprint(medicos_bp)
 
     # Registrar blueprints
 
     app.register_blueprint(turnos_bp)
     app.register_blueprint(logistica_bp)
+    app.register_blueprint(medicos_bp)
+    app.register_blueprint(snomed_bp)
+    app.register_blueprint(pacientes_bp)
     app.register_blueprint(patologias_bp)
     app.register_blueprint(chatbot_bp)
 

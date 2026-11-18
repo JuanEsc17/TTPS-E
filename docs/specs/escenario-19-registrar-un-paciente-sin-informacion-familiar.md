@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 19 – Registrar un paciente sin información familiar
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-19`
 
@@ -10,8 +10,8 @@
 | Categoría | Símbolos LEL exactos |
 |---|---|
 | **Sujetos** | `Médico` (sinónimos: médico tratante, médico derivante), `Paciente` |
-| **Objetos** | `Patología`, `Historia clínica`, `Síntoma`, `Síntoma cardinal`, `Síntoma secundario`, `SNOMED`, `Familiar`, `Familiograma`, `API de familiograma`, `Aviso` |
-| **Verbos** | `Dar de alta paciente`, `Cargar síntomas` |
+| **Objetos** | `Patología`, `Historia clínica`, `Autorización de historia clínica`, `Síntoma`, `Síntoma cardinal`, `Síntoma secundario`, `SNOMED`, `Familiar`, `Familiograma`, `API de familiograma`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Dar de alta paciente`, `Cargar síntomas`, `Autorizar médico a historia clínica`, `Registrar modificación` |
 | **Estados** | *(No aplica transición de estado de `Estudio`; impacta en el alta de `Usuario` con `debe_cambiar_password = True` y `Paciente` con `familiograma_pdf_path = None`)* |
 
 ---
@@ -109,8 +109,10 @@ El **médico** marca explícitamente la opción "Sin información familiar" (o e
 1. Genera una contraseña temporal aleatoria segura y calcula su `password_hash`.
 2. Inserta en `usuarios` una fila con `email`, `password_hash`, `rol = Rol.PACIENTE`, `nombre`, `apellido`, `telefono`, `debe_cambiar_password = True`.
 3. Inserta en `pacientes` una fila con `usuario_id`, `medico_id`, `dni`, `fecha_nacimiento`, `diagnostico_presuntivo_id`, `historia_clinica`, `tipo_sospecha`, `familiograma_pdf_path = None`, `responsable_nombre`, `responsable_dni`.
-4. Inserta en `pacientes_sintomas` las filas `(paciente_id, sintoma_id)` correspondientes a los **síntomas** seleccionados.
-5. **Omite explícitamente** cualquier inserción en `familiares` y `familiares_sintomas`, y **no invoca** a la **API de familiograma**.
+4. Inserta la **autorización de historia clínica** inicial en `pacientes_medicos_autorizados` (`paciente_id = paciente.id`, `medico_id = medico.id`, `otorgada_por_usuario_id = medico.usuario_id`, `activa = True`), habilitando al médico tratante inicial y permitiendo luego que el **paciente** autorice médicos adicionales (Escenario 40).
+5. Inserta en `pacientes_sintomas` las filas `(paciente_id, sintoma_id)` correspondientes a los **síntomas** seleccionados.
+6. Verifica en `familiares` si otro paciente ya había declarado al nuevo paciente por `familiar.dni == paciente.dni` (en cuyo caso actualiza `familiar.paciente_vinculado_id = paciente.id` para habilitar futuros vínculos de estudios familiares conforme al Escenario 41), pero **omite explícitamente** cualquier inserción nueva en `familiares` y `familiares_sintomas` y **no invoca** a la **API de familiograma**.
+7. Inserta en `registro_modificaciones` la entrada inmutable de alta (`entidad_tipo = 'paciente'`, `entidad_id = paciente.id`, `accion = 'creacion'`, `usuario_id = medico.usuario_id`, `origen = 'usuario'`, `cambios` con los campos iniciales registrados, sin incluir credenciales).
 **Timeout**: `5s`
 **Input**: Datos validados de `Usuario`, `Paciente` y `sintomas_ids`.
 **Output on SUCCESS**: `{ usuario_id: int, paciente_id: int, password_inicial_plana: str, familiograma_pdf_path: None }` -> GO TO STEP 4
@@ -315,3 +317,4 @@ El **médico** marca explícitamente la opción "Sin información familiar" (o e
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/perfiles.py` (`Paciente.familiograma_pdf_path`), `clinica.py` (`Familiar`, `PatologiaSintoma`) y `usuarios.py` (`Usuario.debe_cambiar_password`). | Aprobada para implementación. |
+| 2026-11-17 | Adaptación v1.1 por nuevos requerimientos 2, 4 y 6: alta inicial en `pacientes_medicos_autorizados`, resolución retroactiva de `familiar.paciente_vinculado_id` por `dni` (sin generar familiograma propio) y registro de alta en `registro_modificaciones`. | Especificación actualizada (ver ADR-002 y ADR-003). |
