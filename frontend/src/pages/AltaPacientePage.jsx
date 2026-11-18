@@ -8,16 +8,25 @@ import {
 } from "../api/pacientes";
 
 const PARENTESCOS = [
-    "progenitor",
-    "hermano/a",
-    "hijo/a",
-    "abuelo/a materno/a",
-    "abuelo/a paterno/a",
-    "tío/a materno/a",
-    "tío/a paterno/a",
-    "primo/a materno/a",
-    "primo/a paterno/a",
-    "pareja del paciente",
+    "padre",
+    "madre",
+    "hermano",
+    "hermana",
+    "hijo",
+    "hija",
+    "abuelo paterno",
+    "abuela paterna",
+    "abuelo materno",
+    "abuela materna",
+    "tío paterno",
+    "tía paterna",
+    "tío materno",
+    "tía materna",
+    "primo paterno",
+    "prima paterna",
+    "primo materno",
+    "prima materna",
+    "pareja",
 ];
 
 function calcularEdad(fechaStr) {
@@ -65,7 +74,7 @@ export default function AltaPacientePage({ sesion }) {
     // Informacion familiar (E1 / E19)
     const [sinInfoFamiliar, setSinInfoFamiliar] = useState(false);
     const [familiares, setFamiliares] = useState([]);
-    const [nuevoFamParentesco, setNuevoFamParentesco] = useState("progenitor");
+    const [nuevoFamParentesco, setNuevoFamParentesco] = useState("padre");
     const [nuevoFamNombre, setNuevoFamNombre] = useState("");
     const [nuevoFamDiag, setNuevoFamDiag] = useState("");
 

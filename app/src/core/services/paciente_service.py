@@ -25,6 +25,29 @@ def _generar_password_temporal() -> str:
     # Sufijo "A1" garantiza que cumpla la politica de al menos una letra y un numero
     return f"{secrets.token_urlsafe(8)}A1"
 
+def _inferir_sexo_parentesco(parentesco: str) -> str | None:
+    p = parentesco.strip().lower()
+    if any(k in p for k in ("padre", "abuelo", "tio", "tío", "primo", "hermano", "hijo")):
+        return "hombre"
+    if any(k in p for k in ("madre", "abuela", "tia", "tía", "prima", "hermana", "hija")):
+        return "mujer"
+    return None
+
+
+def _extraer_detalle_familiograma(respuesta: object) -> str:
+    if isinstance(respuesta, dict):
+        err = respuesta.get("error")
+        if isinstance(err, dict):
+            detalles = err.get("detalles")
+            if isinstance(detalles, list) and detalles:
+                msgs = [d.get("mensaje") for d in detalles if isinstance(d, dict) and d.get("mensaje")]
+                if msgs:
+                    return " ".join(msgs)
+            if err.get("mensaje"):
+                return str(err["mensaje"])
+    return ""
+
+
 def _generar_svg_familiograma(
     *,
     nombre_paciente: str,
@@ -47,12 +70,16 @@ def _generar_svg_familiograma(
         }
     ]
     for fam in familiares_input:
-        parentesco_id = PARENTESCOS_POR_NOMBRE.get(fam["parentesco"].strip().lower(), 1)
+        clave_par = fam["parentesco"].strip().lower().replace("í", "i").replace("ó", "o")
+        parentesco_id = PARENTESCOS_POR_NOMBRE.get(clave_par, 1)
         persona_fam: dict = {
             "parentesco": parentesco_id,
             "nombre": fam["nombre"],
             "apellido": apellido_paciente,
         }
+        sexo = _inferir_sexo_parentesco(clave_par)
+        if sexo:
+            persona_fam["sexo"] = sexo
         if fam.get("diagnostico_previo"):
             diag = fam["diagnostico_previo"].strip()
             persona_fam["diagnosticos"] = [{"codigo": diag.upper()[:30], "nombre": diag}]
@@ -67,11 +94,17 @@ def _generar_svg_familiograma(
         cliente_fam.guardar_svg(base64_img, destino)
         return str(destino).replace("\\", "/")
     except ClienteError as exc:
+        detalle = _extraer_detalle_familiograma(exc.respuesta)
+        mensaje = (
+            f"No se pudo generar el familiograma: {detalle}"
+            if detalle
+            else f"No se pudo generar el familiograma del paciente: {exc}"
+        )
         raise ErrorDominio(
-            f"No se pudo generar el familiograma del paciente: {exc} | Detalle: {exc.respuesta}",
+            mensaje,
             codigo="FAMILIOGRAMA_SERVICE_ERROR",
-            http_status=502,
-            reintentable=True,
+            http_status=422 if exc.codigo_http == 422 else 502,
+            reintentable=exc.codigo_http != 422,
         ) from exc
 
 def listar_pacientes_medico(usuario_actual_id: int) -> list[dict]:

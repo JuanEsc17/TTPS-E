@@ -8,16 +8,25 @@ import {
 } from "../api/pacientes";
 
 const PARENTESCOS = [
-    "progenitor",
-    "hermano/a",
-    "hijo/a",
-    "abuelo/a materno/a",
-    "abuelo/a paterno/a",
-    "tío/a materno/a",
-    "tío/a paterno/a",
-    "primo/a materno/a",
-    "primo/a paterno/a",
-    "pareja del paciente",
+    "padre",
+    "madre",
+    "hermano",
+    "hermana",
+    "hijo",
+    "hija",
+    "abuelo paterno",
+    "abuela paterna",
+    "abuelo materno",
+    "abuela materna",
+    "tío paterno",
+    "tía paterna",
+    "tío materno",
+    "tía materna",
+    "primo paterno",
+    "prima paterna",
+    "primo materno",
+    "prima materna",
+    "pareja",
 ];
 
 export default function FamiliaresPacientePage({ sesion }) {
@@ -33,7 +42,7 @@ export default function FamiliaresPacientePage({ sesion }) {
     const [aviso, setAviso] = useState("");
 
     // Formulario para agregar un familiar
-    const [parentesco, setParentesco] = useState("progenitor");
+    const [parentesco, setParentesco] = useState("padre");
     const [nombre, setNombre] = useState("");
     const [diagPrevio, setDiagPrevio] = useState("");
     const [busquedaSnomed, setBusquedaSnomed] = useState("");
@@ -148,6 +157,7 @@ export default function FamiliaresPacientePage({ sesion }) {
             }
         } catch (err) {
             setError(err.message);
+            window.scrollTo({ top: 0, behavior: "smooth" });
         } finally {
             setGuardando(false);
         }
@@ -384,7 +394,7 @@ export default function FamiliaresPacientePage({ sesion }) {
 
                             {svgFamiliograma ? (
                                 <div
-                                    className="overflow-auto rounded-xl border border-slate-200 bg-white p-3"
+                                    className="overflow-auto rounded-xl border border-slate-200 bg-white p-3 [&_svg]:h-auto [&_svg]:w-full"
                                     dangerouslySetInnerHTML={{ __html: svgFamiliograma }}
                                 />
                             ) : (
