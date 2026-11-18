@@ -54,6 +54,127 @@ class TurnoService:
         return TurnoRepo.listar_centros()
 
     @staticmethod
+    def _esta_habilitado_para_turno(estudio: Estudio) -> bool:
+        """Evalua si un estudio cumple las condiciones economicas/clinicas para sacar turno."""
+        if estudio.estado == EstadoEstudio.AUTORIZADO:
+            return True
+        if estudio.estado == EstadoEstudio.CREADO and estudio.presupuesto:
+            return any(not p.anulado for p in estudio.presupuesto.pagos)
+        return (
+            estudio.estado == EstadoEstudio.REMUESTREO_REQUERIDO
+            or (estudio.estado == EstadoEstudio.TURNO_SACADO and estudio.ausencias < MAX_AUSENCIAS)
+        )
+
+    @staticmethod
+    def _serializar_centro_dict(centro: CentroExtraccion | None) -> dict[str, Any] | None:
+        """Convierte un CentroExtraccion a diccionario plano."""
+        if not centro:
+            return None
+        return {
+            "id": centro.id,
+            "nombre": centro.nombre,
+            "direccion": centro.direccion,
+            "provincia": centro.provincia,
+            "latitud": centro.latitud,
+            "longitud": centro.longitud,
+        }
+
+    @classmethod
+    def listar_estudios_paciente(cls, usuario_actual_id: int) -> list[dict[str, Any]]:
+        """Lista los estudios del paciente titular con su habilitacion y turno activo."""
+        estudios = TurnoRepo.listar_estudios_de_usuario(usuario_actual_id)
+        resultado: list[dict[str, Any]] = []
+        for e in estudios:
+            turno_activo = next(
+                (t for t in e.turnos if t.activo and t.asistio is None),
+                None,
+            )
+            habilitado = cls._esta_habilitado_para_turno(e) and turno_activo is None
+            resultado.append(
+                {
+                    "estudio_id": e.id,
+                    "estado": e.estado.value,
+                    "patologia": e.patologia_sospechada.nombre if e.patologia_sospechada else None,
+                    "ausencias": e.ausencias,
+                    "max_ausencias": MAX_AUSENCIAS,
+                    "habilitado_para_turno": habilitado,
+                    "turno_activo": (
+                        {
+                            "turno_id": turno_activo.id,
+                            "estudio_id": e.id,
+                            "centro_id": turno_activo.centro_id,
+                            "inicio": turno_activo.inicio.isoformat(),
+                            "duracion_minutos": DURACION_SLOT_MINUTOS,
+                            "ausencias_acumuladas": e.ausencias,
+                            "max_ausencias": MAX_AUSENCIAS,
+                            "centro": cls._serializar_centro_dict(turno_activo.centro),
+                        }
+                        if turno_activo
+                        else None
+                    ),
+                }
+            )
+        return resultado
+
+    @classmethod
+    def listar_turnos_paciente(cls, usuario_actual_id: int) -> list[dict[str, Any]]:
+        """Lista todos los turnos (activos e historicos) del paciente con sus detalles."""
+        turnos = TurnoRepo.listar_turnos_de_usuario(usuario_actual_id)
+        resultado: list[dict[str, Any]] = []
+        for t in turnos:
+            estudio = t.estudio
+            muestra_turno = (
+                next((m for m in estudio.muestras if m.turno_id == t.id), None)
+                if estudio
+                else None
+            )
+
+            if t.asistio is True or muestra_turno is not None:
+                estado_turno = "Asistido"
+            elif not t.activo and t.asistio is False:
+                estado_turno = "Ausente"
+            elif not t.activo:
+                estado_turno = "Cancelado"
+            else:
+                estado_turno = "Confirmado"
+
+            puede_cancelar = bool(
+                t.activo
+                and t.asistio is None
+                and estudio is not None
+                and estudio.estado == EstadoEstudio.TURNO_SACADO
+                and muestra_turno is None
+            )
+
+            resultado.append(
+                {
+                    "turno_id": t.id,
+                    "estudio_id": t.estudio_id,
+                    "estado_estudio": estudio.estado.value if estudio else None,
+                    "patologia": (
+                        estudio.patologia_sospechada.nombre
+                        if (estudio and estudio.patologia_sospechada)
+                        else None
+                    ),
+                    "ausencias_estudio": estudio.ausencias if estudio else 0,
+                    "max_ausencias": MAX_AUSENCIAS,
+                    "inicio": t.inicio.isoformat(),
+                    "duracion_minutos": DURACION_SLOT_MINUTOS,
+                    "activo": t.activo,
+                    "asistio": t.asistio,
+                    "estado_turno": estado_turno,
+                    "puede_cancelar": puede_cancelar,
+                    "muestra_tomada_en": (
+                        muestra_turno.tomada_en.isoformat()
+                        if (muestra_turno and muestra_turno.tomada_en)
+                        else None
+                    ),
+                    "centro": cls._serializar_centro_dict(t.centro),
+                }
+            )
+        return resultado
+
+    @staticmethod
     def es_dia_laborable(
         fecha: date,
         feriados_adicionales: set[date] | None = None,
@@ -89,6 +210,7 @@ class TurnoService:
         centro_id: int,
         fecha: date,
         feriados_adicionales: set[date] | None = None,
+        ahora: datetime | None = None,
     ) -> tuple[dict[str, Any] | None, str | None, int]:
         """Calcula los turnos disponibles en un centro para una fecha dada.
 
@@ -108,6 +230,10 @@ class TurnoService:
                 "slots_libres": [],
             }, None, 200
 
+        fecha_actual = ahora or datetime.now()
+        if fecha_actual.tzinfo is not None:
+            fecha_actual = fecha_actual.replace(tzinfo=None)
+
         # Generamos los 36 slots del dia (de 09:00 a 17:45)
         slots_teoricos = cls.generar_slots_teoricos_del_dia(fecha)
 
@@ -115,9 +241,11 @@ class TurnoService:
         turnos_ocupados = TurnoRepo.listar_turnos_ocupados(centro_id, fecha)
         horarios_ocupados = {t.inicio for t in turnos_ocupados}
 
-        # Filtramos los slots disponibles restando los ocupados
+        # Filtramos los slots disponibles restando los ocupados y horarios ya pasados
         slots_libres = [
-            slot for slot in slots_teoricos if slot not in horarios_ocupados
+            slot
+            for slot in slots_teoricos
+            if slot not in horarios_ocupados and slot > fecha_actual
         ]
 
         return {
@@ -175,16 +303,7 @@ class TurnoService:
             return None, "Los turnos deben ser intervalos exactos de 15 minutos (00, 15, 30, 45).", 422
 
         # 5. Validar habilitacion del Estudio para sacar turno
-        habilitado = False
-        if estudio.estado == EstadoEstudio.AUTORIZADO:
-            habilitado = True
-        elif estudio.estado == EstadoEstudio.CREADO and estudio.presupuesto:
-            habilitado = any(not p.anulado for p in estudio.presupuesto.pagos)
-        elif (
-            estudio.estado == EstadoEstudio.REMUESTREO_REQUERIDO
-            or (estudio.estado == EstadoEstudio.TURNO_SACADO and estudio.ausencias < MAX_AUSENCIAS)
-        ):
-            habilitado = True
+        habilitado = cls._esta_habilitado_para_turno(estudio)
 
         if not habilitado:
             return (

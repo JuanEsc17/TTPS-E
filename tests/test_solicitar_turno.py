@@ -348,9 +348,10 @@ def test_solicitar_turno_colision_mismo_horario_retorna_409(
 @pytest.mark.parametrize(
     ("estado", "ausencias", "con_pago_anulado"),
     [
-        (EstadoEstudio.CREADO, 0, False),        # Creado sin pago
-        (EstadoEstudio.CREADO, 0, True),         # Creado con pago anulado
-        (EstadoEstudio.TURNO_SACADO, 5, False),  # Alcanzo limite de 5 ausencias
+        (EstadoEstudio.CREADO, 0, False),             # Creado sin pago
+        (EstadoEstudio.CREADO, 0, True),              # Creado con pago anulado
+        (EstadoEstudio.TURNO_SACADO, 5, False),       # Alcanzo limite de 5 ausencias
+        (EstadoEstudio.LISTA_PARA_RETIRAR, 0, False), # Ya tiene muestra tomada
     ],
 )
 def test_solicitar_turno_estudio_no_habilitado_retorna_409(
@@ -541,3 +542,69 @@ def test_permisos_recursos_inexistentes_y_rollback_email(
     session.refresh(estudio)
     assert estudio.estado == EstadoEstudio.AUTORIZADO
     assert session.query(Turno).filter_by(estudio_id=estudio.id).count() == 0
+
+
+def test_listar_mis_estudios_para_turno(app, client, session, datos_escenario):
+    """El paciente lista solo sus propios estudios, su habilitacion y su turno activo."""
+    estudio = datos_escenario["estudio"]
+    centro = datos_escenario["centro"]
+    headers_pac = auth_header_para(app, datos_escenario["usuario_paciente"])
+    headers_otro = auth_header_para(app, datos_escenario["usuario_otro"])
+    headers_med = auth_header_para(app, datos_escenario["usuario_medico"])
+
+    # Rol no paciente -> 403
+    assert client.get("/api/v1/turnos/mis-estudios", headers=headers_med).status_code == 403
+
+    # Otro paciente no ve el estudio ajeno
+    res_otro = client.get("/api/v1/turnos/mis-estudios", headers=headers_otro)
+    assert res_otro.status_code == 200
+    assert res_otro.get_json()["data"] == []
+
+    # Paciente titular ve su estudio habilitado y sin turno activo
+    res_antes = client.get("/api/v1/turnos/mis-estudios", headers=headers_pac)
+    assert res_antes.status_code == 200
+    items = res_antes.get_json()["data"]
+    assert len(items) == 1
+    assert items[0]["estudio_id"] == estudio.id
+    assert items[0]["habilitado_para_turno"] is True
+    assert items[0]["turno_activo"] is None
+
+    # Reserva turno y vuelve a consultar -> muestra turno_activo con centro y ya no habilitado
+    horario = proximo_dia_habil(10, 30)
+    res_post = client.post(
+        f"/api/v1/estudios/{estudio.id}/turnos",
+        json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_pac,
+    )
+    assert res_post.status_code == 201
+
+    res_despues = client.get("/api/v1/turnos/mis-estudios", headers=headers_pac)
+    assert res_despues.status_code == 200
+    items_despues = res_despues.get_json()["data"]
+    assert items_despues[0]["habilitado_para_turno"] is False
+    assert items_despues[0]["turno_activo"]["centro"]["id"] == centro.id
+    assert items_despues[0]["turno_activo"]["inicio"] == horario.isoformat()
+
+
+def test_disponibilidad_hoy_filtra_horarios_pasados(app, session, datos_escenario):
+    """Para el dia de hoy solo retorna horarios estrictamente posteriores a la hora actual."""
+    from src.core.services.turno_service import TurnoService
+
+    centro = datos_escenario["centro"]
+    hoy_habil = proximo_dia_habil(12, 20).date()
+    ahora_mediodia = datetime.combine(hoy_habil, datetime.min.time()).replace(hour=12, minute=20)
+
+    with app.app_context():
+        resultado, error, status = TurnoService.obtener_disponibilidad(
+            centro_id=centro.id,
+            fecha=hoy_habil,
+            ahora=ahora_mediodia,
+        )
+        assert status == 200
+        assert error is None
+        slots = resultado["slots_libres"]
+        # Desde 12:30 hasta 17:45 inclusive (22 slots de 15 min)
+        assert len(slots) == 22
+        assert slots[0].endswith("12:30:00")
+        assert slots[-1].endswith("17:45:00")
+        assert all(datetime.fromisoformat(s) > ahora_mediodia for s in slots)
