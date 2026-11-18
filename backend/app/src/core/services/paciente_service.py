@@ -155,7 +155,12 @@ def dar_de_alta_paciente(
             base64_img = (resp_fam.get("imagen") or {}).get("base64")
             if base64_img:
                 destino = _STORAGE_FAMILIOGRAMAS / f"paciente_dni_{dni}.svg"
-                cliente_fam.guardar_svg(base64_img, destino)
+                destino_fisico = (
+                    destino
+                    if destino.is_absolute()
+                    else Path(__file__).resolve().parents[4] / destino
+                )
+                cliente_fam.guardar_svg(base64_img, destino_fisico)
                 familiograma_path = str(destino).replace("\\", "/")
         except ClienteError as exc:
             raise ErrorDominio(
