@@ -14,12 +14,12 @@ import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
 import PatologiasPage from "./pages/PatologiasPage";
 import SolicitarTurnoPage from "./pages/SolicitarTurnoPage";
 import MisTurnosPage from "./pages/MisTurnosPage";
+import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
+import BioinformaticaPage from "./pages/BioinformaticaPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
   { path: "/medico/estudios", titulo: "Estudios médicos" },
-  { path: "/administracion/estudios", titulo: "Panel administrativo" },
-  { path: "/bioinformatica/cola", titulo: "Cola de bioinformática" },
   { path: "/admin/dashboard", titulo: "Administración general" },
 ];
 
@@ -96,6 +96,14 @@ export default function App() {
           <Route
             path="/gerencia/patologias"
             element={<PatologiasPage sesion={sesion} />}
+          />
+          <Route
+            path="/administracion/estudios"
+            element={<DatosCrudosAdminPage sesion={sesion} />}
+          />
+          <Route
+            path="/bioinformatica/cola"
+            element={<BioinformaticaPage sesion={sesion} />}
           />
           <Route
             path="/chatbot"

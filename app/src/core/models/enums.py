@@ -83,3 +83,24 @@ class CanalAviso(enum.Enum):
     MAIL = "mail"
     TELEGRAM = "telegram"
     WHATSAPP = "whatsapp"
+
+
+class ConclusionDiagnostica(enum.Enum):
+    """Conclusion diagnostica del resultado de exoma (ADR-004)."""
+    POSITIVO = "positivo"
+    NEGATIVO = "negativo"
+    VUS = "vus"
+
+
+class EntidadAuditable(enum.Enum):
+    """Entidades auditables en registro_modificaciones (ADR-003)."""
+    SAMPLE_SET = "sample_set"
+    PACIENTE = "paciente"
+    ESTUDIO = "estudio"
+
+
+class TipoAccionAuditoria(enum.Enum):
+    """Tipo de operacion registrada en registro_modificaciones."""
+    CREACION = "creacion"
+    MODIFICACION = "modificacion"
+    CAMBIO_ESTADO = "cambio_estado"
