@@ -9,6 +9,8 @@ import RegistroMedicoPage from "./pages/RegistroMedicoPage";
 import PacientesMedicoPage from "./pages/PacientesMedicoPage";
 import AltaPacientePage from "./pages/AltaPacientePage";
 import FamiliaresPacientePage from "./pages/FamiliaresPacientePage";
+import EstudiosMedicoPage from "./pages/EstudiosMedicoPage";
+import AltaEstudioPage from "./pages/AltaEstudioPage";
 import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 import ChatbotPage from "./pages/ChatbotPage";
 import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
@@ -20,7 +22,6 @@ import BioinformaticaPage from "./pages/BioinformaticaPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
-  { path: "/medico/estudios", titulo: "Estudios médicos" },
   { path: "/admin/dashboard", titulo: "Administración general" },
 ];
 
@@ -85,6 +86,8 @@ export default function App() {
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
+          <Route path="/medico/estudios" element={<EstudiosMedicoPage sesion={sesion} />} />
+          <Route path="/medico/estudios/nuevo" element={<AltaEstudioPage sesion={sesion} />} />
           <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
           <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
           <Route path="/medico/pacientes/:pacienteId/familiares" element={<FamiliaresPacientePage sesion={sesion} />} />

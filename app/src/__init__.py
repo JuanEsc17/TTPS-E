@@ -19,6 +19,7 @@ from .web.api.muestras import muestras_bp
 from .web.api.pacientes import pacientes_bp
 from .web.api.patologias import patologias_bp
 from .web.api.snomed import snomed_bp
+from .web.api.estudios import estudios_bp
 from .web.handlers.errors import registrar_manejadores_errores
 
 
@@ -80,6 +81,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(patologias_bp)
     app.register_blueprint(chatbot_bp)
     app.register_blueprint(bioinformatica_bp)
+    app.register_blueprint(estudios_bp)
 
     @app.cli.command("procesar-ausencias")
     def procesar_ausencias_cli() -> None:
