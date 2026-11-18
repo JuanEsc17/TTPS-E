@@ -11,6 +11,7 @@ from .web.api.turnos import turnos_bp
 load_dotenv()
 
 from .web.api.auth import auth_bp
+from .web.api.bioinformatica import bioinformatica_bp
 from .web.api.chatbot import chatbot_bp
 from .web.api.logistica import logistica_bp
 from .web.api.medicos import medicos_bp
@@ -72,5 +73,6 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(logistica_bp)
     app.register_blueprint(patologias_bp)
     app.register_blueprint(chatbot_bp)
+    app.register_blueprint(bioinformatica_bp)
 
     return app

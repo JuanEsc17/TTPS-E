@@ -1,14 +1,14 @@
 """Datos crudos, analisis bioinformatico y resultado."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
-from .enums import ClasificacionVariante, TipoAnalisis
+from .enums import ClasificacionVariante, ConclusionDiagnostica, TipoAnalisis
 
 if TYPE_CHECKING:
     from .clinica import Gen, Variante
@@ -72,6 +72,10 @@ class Resultado(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     analisis_id: Mapped[int] = mapped_column(ForeignKey("analisis.id"), unique=True)
     positivo: Mapped[bool] = mapped_column(Boolean)
+    diagnostico: Mapped[ConclusionDiagnostica] = mapped_column(
+        Enum(ConclusionDiagnostica), default=ConclusionDiagnostica.NEGATIVO
+    )
+    fecha_proximo_estudio: Mapped[date | None] = mapped_column(Date, index=True)
     pdf_path: Mapped[str] = mapped_column(String(500))
     generado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
@@ -80,3 +84,23 @@ class Resultado(Base):
 
 def calcular_positivo(variantes: list[Variante]) -> bool:
     return any(v.clasificacion == ClasificacionVariante.PATOGENICA for v in variantes)
+
+
+def sumar_un_anio(fecha: date) -> date:
+    """Suma un anio calendario manejando 29 de febrero -> 28 de febrero."""
+    try:
+        return fecha.replace(year=fecha.year + 1)
+    except ValueError:
+        return date(fecha.year + 1, 2, 28)
+
+
+def calcular_conclusion_diagnostica(
+    variantes: list[Variante],
+    fecha_base: date | None = None,
+) -> tuple[bool, ConclusionDiagnostica, date | None]:
+    """Determina positividad, diagnostico y fecha de proximo estudio (+1 anio si VUS)."""
+    if calcular_positivo(variantes):
+        return True, ConclusionDiagnostica.POSITIVO, None
+    if any(v.clasificacion == ClasificacionVariante.VUS for v in variantes):
+        return False, ConclusionDiagnostica.VUS, sumar_un_anio(fecha_base or date.today())
+    return False, ConclusionDiagnostica.NEGATIVO, None

@@ -1,9 +1,10 @@
 """Estudio de exoma y los genes a analizar."""
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Integer
+from sqlalchemy import Boolean, CheckConstraint, Date, Enum, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -30,6 +31,7 @@ class Estudio(TimestampMixin, Base):
     obra_social_id: Mapped[int | None] = mapped_column(ForeignKey("obras_sociales.id"))
     es_pompe_urgente: Mapped[bool] = mapped_column(Boolean, default=False)   # Pompe y menor de 4 meses
     ausencias: Mapped[int] = mapped_column(Integer, default=0)               # llega a 5 -> vuelve a Creado
+    fecha_reevaluacion_vus: Mapped[date | None] = mapped_column(Date, index=True)
 
     paciente: Mapped[Paciente] = relationship(back_populates="estudios")
     medico: Mapped[Medico] = relationship(back_populates="estudios")
