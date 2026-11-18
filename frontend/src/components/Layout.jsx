@@ -6,6 +6,7 @@ import LogoAdn from "./LogoAdn";
 const MENU_POR_ROL = {
     paciente: [
         { to: "/paciente/estudios", label: "Mis estudios" },
+        { to: "/paciente/turno", label: "Turno de extracción" },
         { to: "/chatbot", label: "Asistente de patologías" },
     ],
     medico: [
@@ -60,7 +61,9 @@ export default function Layout({ sesion, onCerrarSesion }) {
     const itemActivo =
         pathname === "/cambiar-password"
             ? "Cambiar contraseña"
-            : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
+            : pathname.endsWith("/turno")
+                ? "Turno de extracción"
+                : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
 
     const contenidoSidebar = (
         <div className="relative flex h-full flex-col justify-between overflow-hidden bg-gradient-to-b from-[#062846] via-[#093D6B] to-[#0B4F8A] p-4 text-white">

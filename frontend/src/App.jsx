@@ -12,6 +12,7 @@ import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 import ChatbotPage from "./pages/ChatbotPage";
 import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
 import PatologiasPage from "./pages/PatologiasPage";
+import SolicitarTurnoPage from "./pages/SolicitarTurnoPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -98,6 +99,14 @@ export default function App() {
           <Route
             path="/chatbot"
             element={<ChatbotPage sesion={sesion} />}
+          />
+          <Route
+            path="/paciente/turno"
+            element={<SolicitarTurnoPage sesion={sesion} />}
+          />
+          <Route
+            path="/paciente/estudios/:estudioId/turno"
+            element={<SolicitarTurnoPage sesion={sesion} />}
           />
           <Route
             path="/transporte/orden-del-dia"

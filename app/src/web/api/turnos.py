@@ -17,6 +17,14 @@ from src.web.validators.turnos_validator import (
 turnos_bp = Blueprint("turnos", __name__, url_prefix="/api/v1")
 
 
+@turnos_bp.get("/turnos/mis-estudios")
+@requiere_sesion(roles=[Rol.PACIENTE])
+def listar_mis_estudios_para_turno() -> tuple[Any, int]:
+    """Retorna los estudios del paciente autenticado con su estado y turno activo."""
+    estudios = TurnoService.listar_estudios_paciente(g.usuario_actual.id)
+    return jsonify({"ok": True, "data": estudios}), 200
+
+
 @turnos_bp.get("/centros-extraccion")
 @requiere_sesion()
 def listar_centros() -> tuple[Any, int]:
