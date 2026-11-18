@@ -1,7 +1,7 @@
 """Servicio de logica de negocio para el procesamiento automatico de ausencias (Escenario 33)."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -10,17 +10,27 @@ from src.core.models.enums import EstadoEstudio
 from src.core.models.estudios import Estudio
 from src.core.models.reglas import MAX_AUSENCIAS
 from src.core.repos.turno_repo import TurnoRepo
-from src.core.services.turno_service import DURACION_SLOT_MINUTOS, TurnoService
+from src.core.services.turno_service import TurnoService
+
+# Los centros atienden hasta las 18:00 hs; al cierre del dia se procesan las ausencias
+HORA_CIERRE_JORNADA = time(18, 0)
 
 
 class AusenciaService:
-    """Coordina la deteccion y el registro automatico de inasistencias a turnos vencidos."""
+    """Coordina la deteccion y el registro automatico de inasistencias al finalizar el dia."""
 
     @staticmethod
     def _normalizar_fecha(fecha: datetime | None = None) -> datetime:
         """Retorna un datetime naive (sin tzinfo) para comparaciones consistentes."""
         valor = fecha or datetime.now()
         return valor.replace(tzinfo=None) if valor.tzinfo is not None else valor
+
+    @staticmethod
+    def _fecha_limite_fin_jornada(fecha_actual: datetime) -> datetime:
+        """Calcula el limite exclusivo (<) de turnos cuya jornada ya finalizo."""
+        if fecha_actual.time() >= HORA_CIERRE_JORNADA:
+            return datetime.combine(fecha_actual.date() + timedelta(days=1), time(0, 0))
+        return datetime.combine(fecha_actual.date(), time(0, 0))
 
     @staticmethod
     def _construir_email_ausencia(
@@ -89,11 +99,11 @@ class AusenciaService:
             )
 
         inicio_turno = cls._normalizar_fecha(turno.inicio)
-        fin_turno = inicio_turno + timedelta(minutes=DURACION_SLOT_MINUTOS)
-        if fecha_actual < fin_turno:
+        cierre_jornada_turno = datetime.combine(inicio_turno.date(), HORA_CIERRE_JORNADA)
+        if fecha_actual < cierre_jornada_turno:
             return (
                 None,
-                "El turno aun se encuentra en curso; solo puede registrarse la ausencia luego de finalizado.",
+                "La jornada del turno aun no finalizo; las ausencias se verifican al finalizar el dia.",
                 422,
             )
 
@@ -157,10 +167,10 @@ class AusenciaService:
         ahora: datetime | None = None,
         email_client: Any | None = None,
     ) -> dict[str, Any]:
-        """Procesa en lote todos los turnos activos vencidos sin muestra registrada."""
+        """Procesa en lote al cierre de jornada todos los turnos sin muestra registrada."""
         fecha_actual = cls._normalizar_fecha(ahora)
-        fecha_limite_inicio = fecha_actual - timedelta(minutes=DURACION_SLOT_MINUTOS)
-        turno_ids = TurnoRepo.listar_ids_turnos_vencidos_sin_procesar(fecha_limite_inicio)
+        fecha_limite_exclusiva = cls._fecha_limite_fin_jornada(fecha_actual)
+        turno_ids = TurnoRepo.listar_ids_turnos_vencidos_sin_procesar(fecha_limite_exclusiva)
 
         procesados: list[dict[str, Any]] = []
         errores: list[dict[str, Any]] = []

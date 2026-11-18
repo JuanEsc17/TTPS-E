@@ -160,8 +160,8 @@ class TurnoRepo:
         return pago_anulado_id
 
     @staticmethod
-    def listar_ids_turnos_vencidos_sin_procesar(fecha_limite_inicio: datetime) -> list[int]:
-        """Retorna IDs de turnos activos vencidos sin muestra ni asistencia registrada."""
+    def listar_ids_turnos_vencidos_sin_procesar(fecha_limite_exclusiva: datetime) -> list[int]:
+        """Retorna IDs de turnos activos de jornadas finalizadas sin muestra ni asistencia."""
         muestra_existente = select(Muestra.id).where(Muestra.turno_id == Turno.id).exists()
         stmt = (
             select(Turno.id)
@@ -169,7 +169,7 @@ class TurnoRepo:
             .where(
                 Turno.activo.is_(True),
                 Turno.asistio.is_(None),
-                Turno.inicio <= fecha_limite_inicio,
+                Turno.inicio < fecha_limite_exclusiva,
                 Estudio.estado == EstadoEstudio.TURNO_SACADO,
                 ~muestra_existente,
             )

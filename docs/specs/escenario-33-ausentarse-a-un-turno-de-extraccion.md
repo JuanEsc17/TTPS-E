@@ -1,5 +1,5 @@
 # WORKFLOW: Escenario 33 – Ausentarse a un turno de extracción
-**Versión**: 1.1
+**Versión**: 1.2
 **Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
@@ -15,7 +15,7 @@
 | **Objetos** | **Presupuesto** | Modelo `Presupuesto` (`presupuestos`), `Pago` (`pagos`: `id`, `presupuesto_id`, `estado`, `anulado`) y `Cuota` (`cuotas`: `estado = ANULADA` si pierde el pago) |
 | **Objetos** | **Registro de modificaciones** | Modelo `RegistroModificacion` (`registro_modificaciones`: audita cambios en `Estudio.ausencias` y `Estudio.estado`) |
 | **Objetos** | **Centro de extracción** | Modelo `CentroExtraccion` (`centros_extraccion`) |
-| **Objetos** | **Muestra** | Modelo `Muestra` (`muestras`: la ausencia de toma de muestra registrada para `turno_id` al finalizar la ventana de 15 minutos del turno confirma inasistencia) |
+| **Objetos** | **Muestra** | Modelo `Muestra` (`muestras`: la ausencia de toma de muestra registrada para `turno_id` al finalizar el día de atención (`18:00 hs`) confirma inasistencia) |
 | **Objetos** | **Mail / Notificación** | Despacho exclusivo por correo electrónico mediante `EmailClient` (`API de Notificaciones por Email`, sin crear filas en tabla `avisos` ni usar Bot de Telegram) |
 | **Verbos** | **Sacar turno** | Habilitado nuevamente de la 1.ª a la 4.ª ausencia sin pagar de nuevo |
 | **Verbos** | **Pagar presupuesto** | Exigido nuevamente al alcanzar la 5.ª ausencia (`MAX_AUSENCIAS = 5`) |
@@ -25,17 +25,17 @@
 
 ## Overview
 
-- **Objetivo:** Detectar y registrar **automáticamente** la ausencia del **paciente** a un **turno** de extracción una vez transcurridos 15 minutos desde su horario de inicio (`turno.inicio + 15 min`), aplicando la regla de negocio del límite de cinco ausencias (`MAX_AUSENCIAS = 5`) y notificando exclusivamente por mail.
-- **Contexto:** El **paciente** pagó el **presupuesto** del **estudio** (o fue **Autorizado** por **obra social**), reservó un **turno** (`EstadoEstudio.TURNO_SACADO`) y no concurre al **centro de extracción** en la fecha y hora pactadas. Ningún usuario administrativo ni administrador general registra inasistencias manualmente por HTTP.
+- **Objetivo:** Detectar y registrar **automáticamente** al finalizar el día (`18:00 hs`) la ausencia del **paciente** a un **turno** de extracción sin toma de muestra registrada, aplicando la regla de negocio del límite de cinco ausencias (`MAX_AUSENCIAS = 5`) y notificando exclusivamente por mail.
+- **Contexto:** El **paciente** pagó el **presupuesto** del **estudio** (o fue **Autorizado** por **obra social**), reservó un **turno** (`EstadoEstudio.TURNO_SACADO`) y no concurre al **centro de extracción** en la fecha pactada. Como el centro avisa por llamada al administrativo durante la jornada, las ausencias se verifican recién al cierre del día (`18:00 hs`). Ningún usuario administrativo ni administrador general registra inasistencias manualmente por HTTP.
 - **Recursos:** **Turno** (`turnos`), contador de ausencias (`Estudio.ausencias`, `MAX_AUSENCIAS = 5`), **estudio** (`estudios`), **pago** (`pagos.anulado`), `EmailClient`.
 - **Episodios:**
-  1. El **paciente** no concurre al **turno** de extracción y transcurren 15 minutos desde su inicio (`ahora >= turno.inicio + 15 min`) sin que exista una `Muestra` registrada.
-  2. El proceso automático (`poetry run flask procesar-ausencias` / `TurnoService.procesar_turnos_vencidos`) detecta el turno vencido, registra la ausencia (`Turno.asistio = False`, `Turno.activo = False`) e incrementa `Estudio.ausencias`.
+  1. El **paciente** no concurre al **turno** de extracción y finaliza el día de atención (`ahora >= 18:00 hs` de la fecha del turno) sin que exista una `Muestra` registrada.
+  2. El proceso automático (`poetry run flask procesar-ausencias` / `AusenciaService.procesar_turnos_vencidos`) detecta los turnos de jornadas finalizadas sin muestra, registra la ausencia (`Turno.asistio = False`, `Turno.activo = False`) e incrementa `Estudio.ausencias`.
   3. El sistema permite al **paciente** **sacar turno** nuevamente sin costo adicional mientras acumule de una a cuatro ausencias (`1 <= Estudio.ausencias < 5`).
   4. Al llegar a la quinta ausencia (`Estudio.ausencias == 5`), el sistema hace que el **paciente** pierda el pago (`Pago.anulado = True`, si existe un pago activo).
   5. El sistema devuelve el **estudio** al estado **Creado** (`EstadoEstudio.CREADO`), y el **paciente** debe **pagar presupuesto** de nuevo (reiniciándose `Estudio.ausencias = 0` en el flujo de pagos del Escenario 6).
 
-**Resumen del flujo:** Cuando vence la ventana horaria de un **turno** activo (`ahora >= Turno.inicio + 15 minutos`) sin que exista confirmación de toma de **muestra**, el comando CLI `procesar-ausencias` invoca `TurnoService.procesar_turnos_vencidos()`. Por cada turno elegible, bloquea el `Turno` y el `Estudio` (`SELECT ... FOR UPDATE`), marca `Turno.asistio = False` y `Turno.activo = False`, e incrementa `Estudio.ausencias += 1`.
+**Resumen del flujo:** Al finalizar la jornada laboral de un **turno** activo (`ahora >= datetime.combine(Turno.inicio.date(), 18:00)`) sin que exista confirmación de toma de **muestra**, el comando CLI `procesar-ausencias` invoca `AusenciaService.procesar_turnos_vencidos()`. Por cada turno elegible, bloquea el `Turno` y el `Estudio` (`SELECT ... FOR UPDATE`), marca `Turno.asistio = False` y `Turno.activo = False`, e incrementa `Estudio.ausencias += 1`.
 - **Rama A (`1 <= Estudio.ausencias <= 4`):** El **paciente** conserva su pago vigente (`Pago.anulado == False`); el sistema le envía únicamente un correo electrónico mediante `EmailClient` informando la ausencia registrada y cuántas oportunidades le restan antes de perder el pago (`5 - Estudio.ausencias`), dejándolo habilitado para elegir un nuevo **turno** (`Sacar turno`).
 - **Rama B (`Estudio.ausencias == 5 == MAX_AUSENCIAS`):** El **paciente** alcanza la quinta ausencia; si existe un `Pago` vigente en el `Presupuesto` del `Estudio`, el sistema lo marca como perdido (`Pago.anulado = True`), retrocede el `Estudio` a `EstadoEstudio.CREADO` y envía un correo electrónico mediante `EmailClient` informando al **paciente** que perdió el pago por acumular 5 inasistencias y debe abonar nuevamente el **presupuesto** para poder volver a **sacar turno**.
 
@@ -46,8 +46,8 @@
 | Actor | Rol en este workflow |
 |---|---|
 | **Paciente** (Sujeto LEL) | No concurre al **turno** reservado; recibe correo electrónico y luego saca un nuevo **turno** (ausencias 1 a 4) o debe **pagar presupuesto** nuevamente (ausencia 5). |
-| **Comando CLI Automático (`procesar-ausencias`)** (`app/src/__init__.py`) | Expone `poetry run flask procesar-ausencias`, diseñado para ejecutarse periódicamente desde un planificador del sistema operativo / tarea programada invocando `TurnoService.procesar_turnos_vencidos()`. *(No existe endpoint HTTP manual para `ADMINISTRATIVO` ni `ADMIN_GENERAL`).* |
-| **Servicio de Turnos** (`app/src/core/services/turno_service.py`) | Ejecuta `procesar_turnos_vencidos` y `registrar_ausencia`, aplica `MAX_AUSENCIAS = 5`, decide entre Rama A (`ausencias < 5`) y Rama B (`ausencias == 5`), anula el `Pago` activo cuando corresponde y despacha el correo por `EmailClient`. |
+| **Comando CLI Automático (`procesar-ausencias`)** (`app/src/__init__.py`) | Expone `poetry run flask procesar-ausencias`, ejecutado al finalizar cada jornada laboral invocando `AusenciaService.procesar_turnos_vencidos()`. *(No existe endpoint HTTP manual para `ADMINISTRATIVO` ni `ADMIN_GENERAL`).* |
+| **Servicio de Ausencias** (`app/src/core/services/ausencia_service.py`) | Ejecuta `procesar_turnos_vencidos` y `registrar_ausencia`, aplica `MAX_AUSENCIAS = 5`, decide entre Rama A (`ausencias < 5`) y Rama B (`ausencias == 5`), anula el `Pago` activo cuando corresponde y despacha el correo por `EmailClient`. |
 | **Repositorio de Turnos** (`app/src/core/repos/turno_repo.py`) | Lista IDs de turnos vencidos sin muestra (`listar_ids_turnos_vencidos_sin_procesar`) y actualiza atómicamente `turnos`, `estudios` y `pagos` bajo bloqueo pesimista. |
 | **API de Notificaciones por Email** (`app/src/clients/email_client.py`) | Envía el correo al paciente con `Idempotency-Key` determinista (`ausencia-turno-<turno_id>`). No se insertan filas en la tabla `avisos`. |
 | **PostgreSQL** (`db`) | Valida `CheckConstraint("ausencias BETWEEN 0 AND 5")` en `estudios` y el índice parcial `uq_turno_activo` en `turnos`. |
@@ -58,7 +58,7 @@
 
 - **Datos existentes en `app/src/core/models/`:**
   - Existe un `Estudio` en estado `EstadoEstudio.TURNO_SACADO` con `0 <= Estudio.ausencias < 5`.
-  - Existe un `Turno` asociado a dicho `Estudio` con `activo == True`, `asistio is None` y cuya ventana (`Turno.inicio + 15 min`) ya ha finalizado (`ahora >= Turno.inicio + 15 min`) sin que exista una `Muestra` vinculada a ese `turno_id`.
+  - Existe un `Turno` asociado a dicho `Estudio` con `activo == True`, `asistio is None` cuya jornada de atención (`18:00 hs` de `Turno.inicio.date()`) ya ha finalizado sin que exista una `Muestra` vinculada a ese `turno_id`.
   - Existe un `Presupuesto` para el `Estudio` con un `Pago` activo (`anulado == False`) o una `Autorizacion` en `ResultadoAutorizacion.AUTORIZADA`.
 - **Estado previo del `Estudio`:** `EstadoEstudio.TURNO_SACADO`.
 
@@ -66,21 +66,21 @@
 
 ## Trigger
 
-- **Comando CLI programado:** `poetry run flask procesar-ausencias` (ejecutado automáticamente cada cierto intervalo mediante cron / Task Scheduler / runner externo).
-- **Entrada de Servicio:** `TurnoService.procesar_turnos_vencidos(ahora=..., email_client=...)` detecta todos los turnos con `activo=True`, `asistio IS NULL`, `estudios.estado == TURNO_SACADO`, sin `Muestra` asociada y `inicio <= ahora - 15 min`.
+- **Comando CLI programado:** `poetry run flask procesar-ausencias` (ejecutado automáticamente al finalizar el día mediante cron / Task Scheduler / runner externo).
+- **Entrada de Servicio:** `AusenciaService.procesar_turnos_vencidos(ahora=..., email_client=...)` detecta todos los turnos con `activo=True`, `asistio IS NULL`, `estudios.estado == TURNO_SACADO`, sin `Muestra` asociada y pertenecientes a jornadas ya cerradas (`inicio < fecha_limite_fin_jornada`).
 
 ---
 
 ## Workflow Tree
 
-### STEP 1: Detección batch y bloqueo transaccional por turno
-**Actor**: CLI (`app/src/__init__.py`) -> Servicio (`turno_service.py`) -> Repositorio (`turno_repo.py`)
+### STEP 1: Detección batch al cierre del día y bloqueo transaccional por turno
+**Actor**: CLI (`app/src/__init__.py`) -> Servicio (`ausencia_service.py`) -> Repositorio (`turno_repo.py`)
 **Action**:
-  1. `TurnoService.procesar_turnos_vencidos(ahora)` calcula `fecha_limite_inicio = fecha_actual - timedelta(minutes=15)` y consulta `TurnoRepo.listar_ids_turnos_vencidos_sin_procesar(fecha_limite_inicio)`.
-  2. Por cada `turno_id`, `TurnoService.registrar_ausencia(turno_id, ahora=fecha_actual)` obtiene el `Turno` con su `Paciente -> Usuario` y `Estudio` (`presupuesto -> pagos`, `autorizaciones`) mediante `SELECT ... FOR UPDATE`.
+  1. `AusenciaService.procesar_turnos_vencidos(ahora)` calcula `fecha_limite_exclusiva = _fecha_limite_fin_jornada(fecha_actual)` (si `ahora >= 18:00`, incluye todos los turnos del día actual y anteriores; si `< 18:00`, solo días previos) y consulta `TurnoRepo.listar_ids_turnos_vencidos_sin_procesar(fecha_limite_exclusiva)`.
+  2. Por cada `turno_id`, `AusenciaService.registrar_ausencia(turno_id, ahora=fecha_actual)` obtiene el `Turno` con su `Paciente -> Usuario` y `Estudio` (`presupuesto -> pagos`, `autorizaciones`) mediante `SELECT ... FOR UPDATE`.
   3. Verifica que `turno.activo == True`, `turno.asistio is None`, `estudio.estado == EstadoEstudio.TURNO_SACADO` y que no exista fila en `muestras` con `turno_id == turno.id`.
   4. Verifica que `estudio.ausencias < MAX_AUSENCIAS` (`5`).
-  5. Verifica que la ventana del turno haya finalizado: `ahora >= turno.inicio + timedelta(minutes=15)`.
+  5. Verifica que la jornada del turno haya finalizado: `ahora >= datetime.combine(turno.inicio.date(), time(18, 0))`.
 **Timeout**: `2s` por turno
 **Input**: `{ turno_id: 210, ahora: datetime }`
 **Output on SUCCESS**: `{ turno: Turno, estudio: Estudio }` -> GO TO STEP 2
@@ -89,12 +89,12 @@
   - `FAILURE(invalid_state)`:
     - El `Turno` ya fue cancelado (`activo == False`), ya tiene asistencia registrada (`asistio is not None`), o `estudio.ausencias >= MAX_AUSENCIAS` -> retorna `409` en resumen del batch.
     - El `Estudio` ya no está en `TURNO_SACADO` o ya existe una `Muestra` para ese `turno_id` -> retorna `409` en resumen del batch.
-    - El horario del `Turno` aún no finalizó (`ahora < turno.inicio + 15 min`) -> retorna `422` en resumen del batch.
+    - La jornada del `Turno` aún no finalizó (`ahora < 18:00` del día del turno) -> retorna `422` en resumen del batch.
 
 ---
 
 ### STEP 2: Registro de la ausencia e incremento de `Estudio.ausencias`
-**Actor**: Servicio de Turnos (`turno_service.py`) -> Repositorio (`turno_repo.py`)
+**Actor**: Servicio de Ausencias (`ausencia_service.py`) -> Repositorio (`turno_repo.py`)
 **Action**:
   1. Marca `turno.asistio = False` y `turno.activo = False` (liberando la restricción `uq_turno_activo` del slot).
   2. Incrementa el contador: `estudio.ausencias = estudio.ausencias + 1` y registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `origen = 'cron_sistema'`).
@@ -105,7 +105,7 @@
 ---
 
 ### STEP 3A: Ausencias 1 a 4 – Habilitar nuevo turno y enviar mail por `EmailClient`
-**Actor**: Servicio de Turnos (`turno_service.py`) -> `EmailClient` -> PostgreSQL
+**Actor**: Servicio de Ausencias (`ausencia_service.py`) -> `EmailClient` -> PostgreSQL
 **Action**:
   1. Mantiene intacto el pago del **paciente** (`Pago.anulado == False`) y el estado del estudio en `EstadoEstudio.TURNO_SACADO`.
   2. Al quedar `turno.activo = False`, el **paciente** queda habilitado para **sacar turno** nuevamente sin costo (`estudio.ausencias < 5`).
@@ -119,7 +119,7 @@
 ---
 
 ### STEP 3B: Quinta ausencia (`ausencias == 5`) – Pérdida del pago, retorno a `Creado` y mail por `EmailClient`
-**Actor**: Servicio de Turnos (`turno_service.py`) -> Repositorio (`turno_repo.py`) -> `EmailClient` -> PostgreSQL
+**Actor**: Servicio de Ausencias (`ausencia_service.py`) -> Repositorio (`turno_repo.py`) -> `EmailClient` -> PostgreSQL
 **Action**:
   1. Localiza el `Pago` activo (`anulado == False`) asociado al `Presupuesto` del `Estudio` y lo marca como `Pago.anulado = True`, `Pago.estado = EstadoPago.ANULADO` (el **paciente** pierde el pago). Asimismo, marca todas las `Cuota`s no pagadas (`estado in (PENDIENTE, VENCIDA, RECHAZADA)`) de ese `Pago` con `estado = EstadoCuota.ANULADA`.
   2. Cambia el estado del `Estudio` a `EstadoEstudio.CREADO` (`estudio.estado = EstadoEstudio.CREADO`), manteniendo `estudio.ausencias = 5` como evidencia del límite alcanzado y registrando el cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `cambios = {"estado": {"anterior": "Turno sacado", "nuevo": "Creado"}, "ausencias": {"anterior": 4, "nuevo": 5}}`, `motivo = "5ta ausencia a turno de extraccion"`). *(Nota: cuando el paciente realice el nuevo pago del presupuesto, el servicio de pagos reiniciará `estudio.ausencias = 0` para habilitar el nuevo ciclo de hasta 5 turnos).*
@@ -145,7 +145,7 @@
 ```
 Turno (turnos):
   [Reservado (activo=True, asistio=None)]
-    -- (STEP 2: Turno vencido >= 15 min sin muestra) -->
+    -- (STEP 2: Cierre del día >= 18:00 hs sin muestra) -->
   [Ausente (activo=False, asistio=False)]
 
 Estudio (estudios.estado + estudios.ausencias) y Pago (pagos.anulado):
@@ -164,10 +164,10 @@ Estudio (estudios.estado + estudios.ausencias) y Pago (pagos.anulado):
 
 ## Handoff Contracts
 
-### Proceso Automático (`flask procesar-ausencias` / `TurnoService.procesar_turnos_vencidos`)
+### Proceso Automático (`flask procesar-ausencias` / `AusenciaService.procesar_turnos_vencidos`)
 *(Sin endpoint HTTP manual para `ADMINISTRATIVO` ni `ADMIN_GENERAL`).*
 
-**Resumen devuelto por `TurnoService.procesar_turnos_vencidos(...)`**:
+**Resumen devuelto por `AusenciaService.procesar_turnos_vencidos(...)`**:
 ```json
 {
   "total_detectados": 1,
@@ -201,7 +201,7 @@ Estudio (estudios.estado + estudios.ausencias) y Pago (pagos.anulado):
 | `TC-03`: Quinta ausencia (`ausencias: 4 -> 5`) hace perder el pago y vuelve a `Creado` | `procesar_turnos_vencidos` sobre estudio con `ausencias=4` | `turno.asistio=False`, `estudio.ausencias=5`, `pago.anulado=True`, `estudio.estado == CREADO`, envía mail informando pérdida del pago. |
 | `TC-04`: Quinta ausencia sin `Pago` (autorizado por obra social) y bloqueo de nuevo turno | `procesar_turnos_vencidos` con `ausencias=4` sin `Pago` + intento de `POST /api/v1/estudios/{eid}/turnos` | `pago_perdido=False`, `pago_anulado_id=None`, `estudio.estado == CREADO`; intentar sacar nuevo turno rechaza con `409 Conflict`. |
 | `TC-05`: Rechazo si existe `Muestra` o el estudio ya avanzó | `procesar_turnos_vencidos` y `registrar_ausencia` con `Muestra` o `estado == LISTA_PARA_RETIRAR` | No detecta el turno en batch; `registrar_ausencia` retorna `409 Conflict`; no incrementa `ausencias`. |
-| `TC-06`: Ventana exacta de 15 min, idempotencia y aislamiento por turno ante fallo de mail | `< 15 min`, exactamente `= 15 min` con fallo en `EmailClient`, y reintento posterior | `< 15 min` se ignora (`422`); fallo en `EmailClient` revierte (`rollback`) solo el turno fallido (`502`); al reintentar se procesa una sola vez sin duplicados. |
+| `TC-06`: Cierre de jornada (18:00 hs), idempotencia y aislamiento por turno ante fallo de mail | Durante la jornada (`< 18:00`), al cierre (`>= 18:00`) con fallo en `EmailClient`, y reintento posterior | Antes de `18:00` se ignora (`422`); al cierre con fallo en `EmailClient` revierte (`rollback`) solo el turno fallido (`502`); al reintentar se procesa una sola vez sin duplicados. |
 | `TC-07`: Comando CLI `procesar-ausencias` y ausencia de endpoint HTTP manual | Ejecución de `flask procesar-ausencias` y `POST /api/v1/turnos/{id}/registrar-ausencia` con roles `ADMINISTRATIVO` / `ADMIN_GENERAL` | Endpoint HTTP manual retorna `404`; comando CLI procesa el turno vencido (`Procesados: 1`) y envía el correo por `EmailClient`. |
 
 *(Nota: el reinicio `ausencias = 0` al abonar nuevamente el presupuesto corresponde al Escenario 6 – Pagar un estudio particular).*
@@ -214,3 +214,4 @@ Estudio (estudios.estado + estudios.ausencias) y Pago (pagos.anulado):
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada verificando `Turno`, `Estudio`, `Pago` y `MAX_AUSENCIAS = 5` en `app/src/core/models/`. | Aprobada. |
 | 2026-11-17 | Actualizada con anulación de cuotas pendientes tras 5.ª ausencia (Req. 1) y auditoría en `registro_modificaciones` sobre `Estudio` (Req. 6). | Actualizada a v1.1. |
+| 2026-11-17 | Extraído servicio `AusenciaService` (`ausencia_service.py`) y ajustada la verificación automática de inasistencias al finalizar la jornada laboral (`18:00 hs`) para compatibilidad con el registro telefónico de muestras en Escenario 9. | Actualizada a v1.2. |

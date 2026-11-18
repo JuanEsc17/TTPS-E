@@ -1,5 +1,5 @@
 """Tests integrales para el flujo automatico de Ausentarse a un Turno (Escenario 33)."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from unittest.mock import MagicMock
 
@@ -142,7 +142,7 @@ def datos_ausencia(session):
         centro_id=centro.id,
         paciente_id=paciente.id,
         estudio_id=estudio.id,
-        inicio=datetime.now() - timedelta(minutes=20),
+        inicio=datetime.combine(date.today() - timedelta(days=1), time(10, 0)),
         activo=True,
         asistio=None,
     )
@@ -326,23 +326,26 @@ def test_no_registra_ausencia_si_existe_muestra_o_estudio_avanzo(
     assert estudio.ausencias == 0
 
 
-def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
+def test_idempotencia_fin_de_dia_y_aislamiento_por_turno_ante_fallo_de_mail(
     app, session, datos_ausencia
 ):
-    """TC-06: Ignora turnos < 15 min, es idempotente y aisla el rollback ante fallo de EmailClient."""
-    ahora = datetime.now().replace(second=0, microsecond=0)
+    """TC-06: No procesa antes del fin del dia (18:00), es idempotente y aisla rollback por turno."""
+    hoy = date.today()
     turno_vencido = datos_ausencia["turno"]
     estudio = datos_ausencia["estudio"]
 
-    # Caso 1: Turno aun dentro de los 15 minutos -> no se detecta ni procesa
-    turno_vencido.inicio = ahora - timedelta(minutes=10)
+    # Caso 1: Turno de hoy a las 10:00 evaluado a las 15:00 (< 18:00) -> no se procesa aun
+    turno_vencido.inicio = datetime.combine(hoy, time(10, 0))
     session.commit()
-    assert AusenciaService.procesar_turnos_vencidos(ahora=ahora)["total_detectados"] == 0
-    _, _, status_422 = AusenciaService.registrar_ausencia(turno_vencido.id, ahora=ahora)
+    ahora_durante_jornada = datetime.combine(hoy, time(15, 0))
+    assert AusenciaService.procesar_turnos_vencidos(ahora=ahora_durante_jornada)["total_detectados"] == 0
+    _, _, status_422 = AusenciaService.registrar_ausencia(
+        turno_vencido.id, ahora=ahora_durante_jornada
+    )
     assert status_422 == 422
 
-    # Caso 2: Exactamente al cumplirse los 15 min -> si falla EmailClient, revierte solo ese turno
-    turno_vencido.inicio = ahora - timedelta(minutes=15)
+    # Caso 2: Al finalizar el dia (18:00 hs) -> si falla EmailClient, revierte solo ese turno
+    ahora_cierre = datetime.combine(hoy, time(18, 0))
 
     estudio_ok = Estudio(
         paciente_id=datos_ausencia["paciente"].id,
@@ -357,7 +360,7 @@ def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
         centro_id=datos_ausencia["centro"].id,
         paciente_id=datos_ausencia["paciente"].id,
         estudio_id=estudio_ok.id,
-        inicio=ahora - timedelta(minutes=25),
+        inicio=datetime.combine(hoy, time(9, 30)),
         activo=True,
         asistio=None,
     )
@@ -369,7 +372,9 @@ def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
         {"id": "mail-ok", "estado": "pendiente"},
         ClienteConexionError("Timeout API Mail"),
     ]
-    resumen_fallo = AusenciaService.procesar_turnos_vencidos(ahora=ahora, email_client=mock_email)
+    resumen_fallo = AusenciaService.procesar_turnos_vencidos(
+        ahora=ahora_cierre, email_client=mock_email
+    )
     assert resumen_fallo["total_detectados"] == 2
     assert resumen_fallo["total_procesados"] == 1
     assert len(resumen_fallo["errores"]) == 1
@@ -387,13 +392,13 @@ def test_idempotencia_ventana_15_min_y_aislamiento_por_turno_ante_fallo_de_mail(
     # Caso 3: Al recuperarse EmailClient, reprocesa turno_vencido y una 2da corrida no duplica
     mock_email_ok = MagicMock(spec=EmailClient)
     resumen_reintento = AusenciaService.procesar_turnos_vencidos(
-        ahora=ahora, email_client=mock_email_ok
+        ahora=ahora_cierre, email_client=mock_email_ok
     )
     assert resumen_reintento["total_detectados"] == 1
     assert resumen_reintento["total_procesados"] == 1
 
     resumen_idempotente = AusenciaService.procesar_turnos_vencidos(
-        ahora=ahora, email_client=mock_email_ok
+        ahora=ahora_cierre, email_client=mock_email_ok
     )
     assert resumen_idempotente["total_detectados"] == 0
     session.refresh(estudio)

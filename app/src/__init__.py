@@ -79,7 +79,7 @@ def create_app(config: dict | None = None) -> Flask:
 
     @app.cli.command("procesar-ausencias")
     def procesar_ausencias_cli() -> None:
-        """Procesa automaticamente turnos vencidos (> 15 min) sin muestra y notifica por mail."""
+        """Procesa automaticamente al finalizar el dia los turnos sin muestra y notifica por mail."""
         from .core.services.ausencia_service import AusenciaService
 
         resumen = AusenciaService.procesar_turnos_vencidos()
