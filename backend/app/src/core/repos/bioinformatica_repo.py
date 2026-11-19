@@ -41,7 +41,8 @@ def _opciones_estudio_completo():
         selectinload(Estudio.analisis).selectinload(Analisis.genes).selectinload(AnalisisGen.gen),
         selectinload(Estudio.analisis)
         .selectinload(Analisis.variantes)
-        .selectinload(AnalisisVariante.variante),
+        .selectinload(AnalisisVariante.variante)
+        .selectinload(Variante.gen),
         selectinload(Estudio.analisis).selectinload(Analisis.resultado),
     )
 
@@ -129,6 +130,20 @@ def copiar_genes_a_analisis(analisis_id: int, genes_ids: list[int]) -> None:
 
 def buscar_gen_por_id(gen_id: int) -> Gen | None:
     return db.session.get(Gen, gen_id)
+
+
+def buscar_medico_por_id(medico_id: int) -> Medico | None:
+    stmt = (
+        select(Medico)
+        .where(Medico.id == medico_id)
+        .options(selectinload(Medico.usuario))
+    )
+    return db.session.scalar(stmt)
+
+
+def buscar_medico_por_usuario_id(usuario_id: int) -> Medico | None:
+    stmt = select(Medico).where(Medico.usuario_id == usuario_id)
+    return db.session.scalar(stmt)
 
 
 def listar_variantes_por_gen(

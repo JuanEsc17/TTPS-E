@@ -884,7 +884,19 @@ def registrar_variantes_analisis(
         )
 
     activo = _analisis_activo(estudio)
-    if activo is None or activo.bioinformatico_id != usuario_id:
+    if activo is None:
+        if any(a.bioinformatico_id == usuario_id and a.resultado is not None for a in estudio.analisis):
+            raise ErrorDominio(
+                "El analisis ya posee un resultado registrado.",
+                codigo="RESULTADO_YA_EXISTE_PARA_ANALISIS",
+                http_status=409,
+            )
+        raise ErrorDominio(
+            "El estudio esta asignado a otro bioinformatico.",
+            codigo="ESTUDIO_ASIGNADO_A_OTRO_BIOINFORMATICO",
+            http_status=403,
+        )
+    if activo.bioinformatico_id != usuario_id:
         raise ErrorDominio(
             "El estudio esta asignado a otro bioinformatico.",
             codigo="ESTUDIO_ASIGNADO_A_OTRO_BIOINFORMATICO",
