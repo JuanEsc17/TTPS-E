@@ -10,14 +10,16 @@ import PacientesMedicoPage from "./pages/PacientesMedicoPage";
 import AltaPacientePage from "./pages/AltaPacientePage";
 import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 import ChatbotPage from "./pages/ChatbotPage";
+import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
 import PatologiasPage from "./pages/PatologiasPage";
+import SolicitarTurnoPage from "./pages/SolicitarTurnoPage";
+import MisTurnosPage from "./pages/MisTurnosPage";
+import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
+import BioinformaticaPage from "./pages/BioinformaticaPage";
+import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
+import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 
 const RUTAS_INICIO = [
-  { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
-  { path: "/medico/estudios", titulo: "Estudios médicos" },
-  { path: "/administracion/estudios", titulo: "Panel administrativo" },
-  { path: "/bioinformatica/cola", titulo: "Cola de bioinformática" },
-  { path: "/transporte/orden-del-dia", titulo: "Orden del día" },
   { path: "/admin/dashboard", titulo: "Administración general" },
 ];
 
@@ -28,24 +30,6 @@ function PanelPlaceholder({ titulo }) {
       <p className="mt-1 text-sm text-slate-600">
         Sesión iniciada correctamente desde un dispositivo conocido.
       </p>
-    </div>
-  );
-}
-
-function FlujoPendiente({ titulo, descripcion }) {
-  const { state } = useLocation();
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-lg font-semibold text-slate-900">{titulo}</h1>
-        <p className="mt-2 text-sm text-slate-600">{descripcion}</p>
-        {state?.usuario?.email && (
-          <p className="mt-2 text-xs text-slate-500">Cuenta: {state.usuario.email}</p>
-        )}
-        <Link to="/login" className="mt-4 inline-block text-sm font-medium text-sky-600 hover:underline">
-          Volver al login
-        </Link>
-      </div>
     </div>
   );
 }
@@ -82,6 +66,9 @@ export default function App() {
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
+          <Route path="/paciente/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
+          <Route path="/medico/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
+          <Route path="/estudios/:estudioId/resultado" element={<ResultadoEstudioPage sesion={sesion} />} />
           <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
           <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
@@ -96,8 +83,32 @@ export default function App() {
             element={<PatologiasPage sesion={sesion} />}
           />
           <Route
+            path="/administracion/estudios"
+            element={<DatosCrudosAdminPage sesion={sesion} />}
+          />
+          <Route
+            path="/bioinformatica/cola"
+            element={<BioinformaticaPage sesion={sesion} />}
+          />
+          <Route
             path="/chatbot"
             element={<ChatbotPage sesion={sesion} />}
+          />
+          <Route
+            path="/paciente/turno"
+            element={<SolicitarTurnoPage sesion={sesion} />}
+          />
+          <Route
+            path="/paciente/estudios/:estudioId/turno"
+            element={<SolicitarTurnoPage sesion={sesion} />}
+          />
+          <Route
+            path="/paciente/mis-turnos"
+            element={<MisTurnosPage sesion={sesion} />}
+          />
+          <Route
+            path="/transporte/orden-del-dia"
+            element={<OrdenDelDiaPage sesion={sesion} />}
           />
         </Route>
 

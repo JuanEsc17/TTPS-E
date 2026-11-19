@@ -25,7 +25,7 @@ Closes #
 - [ ] Se respetó el flujo SDD (`docs/specs/` y vocabulario oficial en `.ai/2-Glosario_LEL.md`).
 - [ ] Todos los nombres de dominio (modelos, estados, servicios, variables) están en español.
 - [ ] El backend respeta la separación en capas (`router` → `service` → `repo` + `clients`).
-- [ ] No se modificaron migraciones de base de datos ya aplicadas ni se agregaron dependencias a `pyproject.toml` sin acuerdo previo.
-- [ ] Tests backend ejecutados y pasando (`poetry run pytest`).
-- [ ] Linter backend sin errores (`poetry run ruff check .`).
+- [ ] No se modificaron migraciones de base de datos ya aplicadas ni se agregaron dependencias a `backend/pyproject.toml` sin acuerdo previo.
+- [ ] Tests backend ejecutados y pasando (`poetry run pytest` en `backend/`).
+- [ ] Linter backend sin errores (`poetry run ruff check .` en `backend/`).
 - [ ] Frontend verificado (`npm run lint` y `npm run build` en `frontend/`, si aplica).
