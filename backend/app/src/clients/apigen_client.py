@@ -75,7 +75,7 @@ class ApigenClient:
                 codigo_http=codigo,
                 respuesta=datos_error,
             )
-        if codigo in (400, 422):
+        if codigo in (400, 404, 422):
             raise ClienteValidacionError(
                 f"Error de validacion en Apigen ({codigo}): {mensaje}",
                 codigo_http=codigo,

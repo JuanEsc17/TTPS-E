@@ -1,4 +1,4 @@
-"""Servicio de logica de negocio para analisis bioinformatico (Escenario 15)."""
+"""Servicio de logica de negocio para analisis bioinformatico (Escenarios 15 y 24)."""
 from __future__ import annotations
 
 import logging
@@ -7,6 +7,7 @@ import re
 import time
 from typing import Any
 
+import httpx
 from flask import current_app, has_app_context
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from src.clients import (
@@ -24,6 +25,7 @@ from src.core.models import (
     EntidadAuditable,
     EstadoEstudio,
     Estudio,
+    Gen,
     Rol,
     TipoAccionAuditoria,
     Variante,
@@ -36,6 +38,7 @@ logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
 
 MAX_BYTES_DATOS_CRUDOS = 5 * 1024 * 1024  # 5 MB
+_BACKOFFS_BIOINFORMATICA = (0.5, 1.0)
 
 _MAPA_CLASIFICACION: dict[str, ClasificacionVariante] = {
     "patogenica": ClasificacionVariante.PATOGENICA,
@@ -43,11 +46,12 @@ _MAPA_CLASIFICACION: dict[str, ClasificacionVariante] = {
     "benigna": ClasificacionVariante.BENIGNA,
     "inocua": ClasificacionVariante.INOCUA,
     "vus": ClasificacionVariante.VUS,
+    # shortcut: Apigen devuelve 'probablemente_patogenica' (y confirma_diagnostico=False); actualizar si el LEL agrega una 5ta clasificacion
     "probablemente_patogenica": ClasificacionVariante.VUS,
 }
 
 
-def _resolver_bioinformatica_client(client: Any | None = None) -> Any:
+def _resolver_bioinformatica_client(client: Any | None = None, *, timeout: float = 5.0) -> Any:
     if client is not None:
         return client
     if has_app_context():
@@ -57,7 +61,10 @@ def _resolver_bioinformatica_client(client: Any | None = None) -> Any:
         )
         if configurado is not None:
             return configurado
-    return ApigenClient(timeout=8.0)
+        instancia = ApigenClient(timeout=timeout)
+        current_app.extensions["bioinformatica_client"] = instancia
+        return instancia
+    return ApigenClient(timeout=timeout)
 
 
 def _validar_y_normalizar_actg(
@@ -522,32 +529,54 @@ def tomar_estudio(
     }
 
 
-def _normalizar_variantes_externas(crudos: Any) -> list[dict[str, Any]]:
+def _normalizar_variantes_externas(crudos: Any, *, estricto: bool = False) -> list[dict[str, Any]]:
+    def _error_payload(motivo: str) -> ErrorDominio:
+        logger.warning("[bioinformatica_client] payload invalido de Apigen: %s", motivo)
+        return ErrorDominio(
+            "La API de bioinformatica devolvio una respuesta invalida.",
+            codigo="RESPUESTA_INVALIDA_API_BIOINFORMATICA",
+            http_status=502,
+        )
+
     if isinstance(crudos, dict):
+        if estricto and (crudos.get("ok") is False or not isinstance(crudos.get("variantes"), list)):
+            raise _error_payload("dict sin ok/variantes")
         lista = crudos.get("variantes", [])
+        if not isinstance(lista, list):
+            return []
     elif isinstance(crudos, list):
         lista = crudos
     else:
+        if estricto:
+            raise _error_payload(f"tipo raiz inesperado: {type(crudos).__name__}")
         return []
 
     normalizadas: list[dict[str, Any]] = []
     vistas: set[str] = set()
     for item in lista:
         if not isinstance(item, dict):
+            if estricto:
+                raise _error_payload(f"item no es dict: {type(item).__name__}")
             continue
-        notacion_raw = str(item.get("notacion") or item.get("hgvs_c") or "").strip()
-        if not notacion_raw or notacion_raw in vistas:
+        notacion = str(item.get("notacion") or item.get("hgvs_c") or "").strip()[:120]
+        if not notacion:
+            if estricto:
+                raise _error_payload("item sin notacion/hgvs_c")
+            continue
+        if notacion in vistas:
             continue
         clas_raw = str(item.get("clasificacion") or "").strip().lower()
         clasificacion = _MAPA_CLASIFICACION.get(clas_raw)
         if clasificacion is None:
+            if estricto:
+                raise _error_payload(f"clasificacion desconocida: {clas_raw!r}")
             continue
         clinvar_raw = item.get("clinvar_id") or item.get("id")
         clinvar_id = str(clinvar_raw).strip()[:30] if clinvar_raw else None
-        vistas.add(notacion_raw)
+        vistas.add(notacion)
         normalizadas.append(
             {
-                "notacion": notacion_raw[:120],
+                "notacion": notacion,
                 "clinvar_id": clinvar_id,
                 "clasificacion": clasificacion,
             }
@@ -565,20 +594,22 @@ def _serializar_variante(v: Variante) -> dict[str, Any]:
     }
 
 
-def consultar_variantes_gen(
+def _obtener_y_sincronizar_variantes(
     *,
-    gen_id: int,
+    gen: Gen,
     q: str | None = None,
     clasificacion: str | None = None,
     limite: int | None = None,
     offset: int = 0,
     bioinformatica_client: Any | None = None,
-) -> dict[str, Any]:
-    """STEP 3: Consulta variantes en API de bioinformatica, sincroniza en BD y cae a cache local."""
-    gen = bioinformatica_repo.buscar_gen_por_id(gen_id)
-    if gen is None:
-        raise ErrorDominio("Gen no encontrado.", codigo="GEN_NO_ENCONTRADO", http_status=404)
-
+    estricto: bool = False,
+    codigo_no_disponible: str = "BIOINFORMATICS_API_UNAVAILABLE",
+    status_no_disponible: int = 502,
+    codigo_error_externo: str = "BIOINFORMATICS_API_ERROR",
+    status_error_bd: int = 500,
+    estudio_id: int | None = None,
+) -> tuple[list[Variante], str]:
+    """Consulta la API de bioinformatica con reintentos, sincroniza en BD y usa cache ante caida."""
     clasificacion_enum: ClasificacionVariante | None = None
     if clasificacion:
         clas_limpia = clasificacion.strip().lower()
@@ -625,12 +656,18 @@ def consultar_variantes_gen(
                 intento + 1,
                 exc,
             )
-            if intento < 2:
-                time.sleep(1.0)
-        except ClienteError as exc:
+            if intento < len(_BACKOFFS_BIOINFORMATICA):
+                time.sleep(_BACKOFFS_BIOINFORMATICA[intento])
+        except (ClienteError, httpx.HTTPStatusError, ValueError) as exc:
+            logger.warning(
+                "[bioinformatica_client] error permanente gen_id=%s simbolo=%s err=%s",
+                gen.id,
+                gen.simbolo,
+                exc,
+            )
             raise ErrorDominio(
-                f"Error al consultar la API de bioinformatica: {exc}",
-                codigo="BIOINFORMATICS_API_ERROR",
+                "Error al consultar la API de bioinformatica.",
+                codigo=codigo_error_externo,
                 http_status=502,
             ) from exc
 
@@ -639,47 +676,188 @@ def consultar_variantes_gen(
             gen.id,
             q=q,
             clasificacion=clasificacion_enum,
+            limite=limite,
+            offset=offset,
         )
         if cacheadas:
-            return {
-                "gen_id": gen.id,
-                "simbolo": gen.simbolo,
-                "nombre": gen.nombre,
-                "fuente": "cache_local_contingencia",
-                "warning": "USANDO_CATALOGO_LOCAL_CACHEADO",
-                "variantes": [_serializar_variante(v) for v in cacheadas],
-            }
+            return cacheadas, "cache_local_contingencia"
         raise ErrorDominio(
-            "Servicio de bioinformatica no disponible",
-            codigo="BIOINFORMATICS_API_UNAVAILABLE",
-            http_status=502,
+            "Servicio de bioinformatica no disponible.",
+            codigo=codigo_no_disponible,
+            http_status=status_no_disponible,
             reintentable=True,
         )
 
-    normalizadas = _normalizar_variantes_externas(crudos)
+    normalizadas = _normalizar_variantes_externas(crudos, estricto=estricto)
+    logger.info(
+        "[bioinformatica_client] step_2_consultar_variantes_gen simbolo=%s status=200 variantes_recibidas=%s",
+        gen.simbolo,
+        len(normalizadas),
+    )
+
     try:
         variantes = bioinformatica_repo.sincronizar_variantes_gen(gen.id, normalizadas)
     except SQLAlchemyError as exc:
         bioinformatica_repo.deshacer_cambios()
+        logger.error(
+            "[bioinformatica_service] abort_cleanup_variantes estudio_id=%s gen_id=%s err=%s",
+            estudio_id,
+            gen.id,
+            exc,
+        )
         raise ErrorDominio(
             "Error al sincronizar el catalogo local de variantes.",
             codigo="DB_ERROR",
-            http_status=500,
+            http_status=status_error_bd,
             reintentable=True,
         ) from exc
 
     logger.info(
-        '[bioinformatica_client] variantes_consultadas gen_id=%s simbolo="%s" cantidad=%s',
+        "[clinica_repo] step_3_sincronizar_variantes_ok gen_id=%s total_variantes=%s",
         gen.id,
-        gen.simbolo,
         len(variantes),
     )
-    return {
+    return variantes, "api_bioinformatica"
+
+
+def consultar_variantes_gen(
+    *,
+    gen_id: int,
+    q: str | None = None,
+    clasificacion: str | None = None,
+    limite: int | None = None,
+    offset: int = 0,
+    bioinformatica_client: Any | None = None,
+) -> dict[str, Any]:
+    """STEP 3 (Escenario 15): Consulta variantes en API de bioinformatica, sincroniza y cae a cache local."""
+    gen = bioinformatica_repo.buscar_gen_por_id(gen_id)
+    if gen is None:
+        raise ErrorDominio("Gen no encontrado.", codigo="GEN_NO_ENCONTRADO", http_status=404)
+
+    variantes, fuente = _obtener_y_sincronizar_variantes(
+        gen=gen,
+        q=q,
+        clasificacion=clasificacion,
+        limite=limite,
+        offset=offset,
+        bioinformatica_client=bioinformatica_client,
+    )
+    respuesta: dict[str, Any] = {
         "gen_id": gen.id,
         "simbolo": gen.simbolo,
         "nombre": gen.nombre,
-        "fuente": "api_bioinformatica",
+        "fuente": fuente,
         "variantes": [_serializar_variante(v) for v in variantes],
+    }
+    if fuente == "cache_local_contingencia":
+        respuesta["warning"] = "USANDO_CATALOGO_LOCAL_CACHEADO"
+    return respuesta
+
+
+def consultar_variantes_estudio(
+    *,
+    estudio_id: int,
+    gen_id: int,
+    usuario_id: int,
+    q: str | None = None,
+    clasificacion: str | None = None,
+    limite: int | None = None,
+    offset: int = 0,
+    bioinformatica_client: Any | None = None,
+) -> dict[str, Any]:
+    """Escenario 24: Valida estudio y gen en analisis, consulta API de bioinformatica y sincroniza variantes."""
+    try:
+        estudio = bioinformatica_repo.buscar_estudio_por_id(estudio_id, completo=False)
+        gen = bioinformatica_repo.buscar_gen_por_id(gen_id)
+    except SQLAlchemyError as exc:
+        bioinformatica_repo.deshacer_cambios()
+        logger.error(
+            "[analisis_service] step_1_error_bd estudio_id=%s gen_id=%s err=%s",
+            estudio_id,
+            gen_id,
+            exc,
+        )
+        raise ErrorDominio(
+            "No se pudo consultar el estudio o el gen en este momento.",
+            codigo="DB_TIMEOUT_O_ERROR",
+            http_status=504,
+            reintentable=True,
+        ) from exc
+
+    if estudio is None or gen is None:
+        raise ErrorDominio(
+            "El estudio o el gen seleccionado no existe.",
+            codigo="ESTUDIO_O_GEN_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    if estudio.estado != EstadoEstudio.EN_ANALISIS_BIOINFORMATICO:
+        raise ErrorDominio(
+            "El estudio debe estar en estado 'En analisis de un bioinformatico' para consultar variantes.",
+            codigo="ESTADO_ESTUDIO_INVALIDO_PARA_ANALISIS",
+            http_status=409,
+        )
+
+    activo = _analisis_activo(estudio)
+    if activo is None or activo.bioinformatico_id != usuario_id:
+        raise ErrorDominio(
+            "El estudio esta asignado a otro bioinformatico.",
+            codigo="ESTUDIO_ASIGNADO_A_OTRO_BIOINFORMATICO",
+            http_status=403,
+        )
+
+    genes_del_estudio = (
+        {ag.gen_id for ag in activo.genes}
+        if activo.genes
+        else {eg.gen_id for eg in estudio.genes}
+    )
+    if gen.id not in genes_del_estudio:
+        raise ErrorDominio(
+            "El gen seleccionado no pertenece a la lista de genes a analizar en este estudio.",
+            codigo="GEN_NO_SOLICITADO_EN_ESTUDIO",
+            http_status=422,
+        )
+
+    logger.info(
+        "[analisis_service] step_1_validar_consulta_variantes estudio_id=%s gen_id=%s simbolo=%s",
+        estudio.id,
+        gen.id,
+        gen.simbolo,
+    )
+
+    variantes, fuente = _obtener_y_sincronizar_variantes(
+        gen=gen,
+        q=q,
+        clasificacion=clasificacion,
+        limite=limite,
+        offset=offset,
+        bioinformatica_client=bioinformatica_client,
+        estricto=True,
+        codigo_no_disponible="API_BIOINFORMATICA_NO_DISPONIBLE",
+        status_no_disponible=503,
+        codigo_error_externo="RESPUESTA_INVALIDA_API_BIOINFORMATICA",
+        status_error_bd=503,
+        estudio_id=estudio.id,
+    )
+
+    return {
+        "estudio_id": estudio.id,
+        "estado_estudio": estudio.estado.value,
+        "gen": {
+            "gen_id": gen.id,
+            "simbolo": gen.simbolo,
+            "nombre": gen.nombre,
+        },
+        "fuente": fuente,
+        "variantes": [
+            {
+                "variante_id": v.id,
+                "notacion": v.notacion,
+                "clinvar_id": v.clinvar_id,
+                "clasificacion": v.clasificacion.value,
+            }
+            for v in variantes
+        ],
     }
 
 

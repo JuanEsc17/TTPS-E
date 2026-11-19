@@ -1,4 +1,4 @@
-"""Blueprint de endpoints para analisis bioinformatico y carga de datos crudos (Escenario 15)."""
+"""Blueprint de endpoints para analisis bioinformatico y carga de datos crudos (Escenarios 15 y 24)."""
 from __future__ import annotations
 
 from flask import Blueprint, g, jsonify, request
@@ -88,6 +88,21 @@ def consultar_variantes_gen(gen_id: int):
         offset=offset,
     )
     return jsonify({"ok": True, **resultado}), 200
+
+
+@bioinformatica_bp.get("/v1/estudios/<int:estudio_id>/genes/<int:gen_id>/variantes")
+@requiere_sesion(roles=(Rol.BIOINFORMATICO,), codigo_rol_denegado="SOLO_BIOINFORMATICO")
+def consultar_variantes_estudio(estudio_id: int, gen_id: int):
+    resultado = bioinformatica_service.consultar_variantes_estudio(
+        estudio_id=estudio_id,
+        gen_id=gen_id,
+        usuario_id=g.usuario_actual.id,
+        q=request.args.get("q"),
+        clasificacion=request.args.get("clasificacion"),
+        limite=request.args.get("limite", type=int),
+        offset=request.args.get("offset", default=0, type=int),
+    )
+    return jsonify({"ok": True, "data": resultado}), 200
 
 
 @bioinformatica_bp.post("/bioinformatica/estudios/<int:estudio_id>/analisis")

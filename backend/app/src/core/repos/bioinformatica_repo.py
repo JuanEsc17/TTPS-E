@@ -4,7 +4,9 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from src.core.database import db
@@ -44,12 +46,26 @@ def _opciones_estudio_completo():
     )
 
 
-def buscar_estudio_por_id(estudio_id: int, *, bloquear: bool = False) -> Estudio | None:
+def _opciones_estudio_analisis():
+    return (
+        selectinload(Estudio.genes),
+        selectinload(Estudio.analisis).selectinload(Analisis.genes),
+        selectinload(Estudio.analisis).selectinload(Analisis.resultado),
+    )
+
+
+def buscar_estudio_por_id(
+    estudio_id: int,
+    *,
+    bloquear: bool = False,
+    completo: bool = True,
+) -> Estudio | None:
     """Obtiene un estudio con sus relaciones clinicas y de analisis."""
+    opciones = _opciones_estudio_completo() if completo else _opciones_estudio_analisis()
     stmt = (
         select(Estudio)
         .where(Estudio.id == estudio_id)
-        .options(*_opciones_estudio_completo())
+        .options(*opciones)
     )
     if bloquear:
         stmt = stmt.with_for_update()
@@ -120,6 +136,8 @@ def listar_variantes_por_gen(
     *,
     q: str | None = None,
     clasificacion: ClasificacionVariante | None = None,
+    limite: int | None = None,
+    offset: int = 0,
 ) -> list[Variante]:
     """Consulta el catalogo local cacheado de variantes de un gen."""
     stmt = select(Variante).where(Variante.gen_id == gen_id)
@@ -128,40 +146,44 @@ def listar_variantes_por_gen(
     if clasificacion is not None:
         stmt = stmt.where(Variante.clasificacion == clasificacion)
     stmt = stmt.order_by(Variante.notacion.asc(), Variante.id.asc())
+    if offset:
+        stmt = stmt.offset(offset)
+    if limite is not None:
+        stmt = stmt.limit(limite)
     return list(db.session.scalars(stmt).all())
 
 
 def _aplicar_upsert_variantes(gen_id: int, items: list[dict[str, Any]]) -> list[Variante]:
     notaciones = [item["notacion"] for item in items]
-    existentes = {
-        v.notacion: v
-        for v in db.session.scalars(
-            select(Variante).where(
-                Variante.gen_id == gen_id,
-                Variante.notacion.in_(notaciones),
-            )
-        ).all()
-    }
-    resultado: list[Variante] = []
-    for item in items:
-        notacion = item["notacion"]
-        variante = existentes.get(notacion)
-        if variante is None:
-            variante = Variante(
-                gen_id=gen_id,
-                notacion=notacion,
-                clinvar_id=item["clinvar_id"],
-                clasificacion=item["clasificacion"],
-            )
-            db.session.add(variante)
-            existentes[notacion] = variante
-        else:
-            variante.clasificacion = item["clasificacion"]
-            if item["clinvar_id"] is not None:
-                variante.clinvar_id = item["clinvar_id"]
-        resultado.append(variante)
+    dialecto = db.session.get_bind().dialect.name
+    insert_fn = pg_insert if dialecto == "postgresql" else sqlite_insert
+    filas = [
+        {
+            "gen_id": gen_id,
+            "notacion": item["notacion"],
+            "clinvar_id": item["clinvar_id"],
+            "clasificacion": item["clasificacion"],
+        }
+        for item in items
+    ]
+    stmt = insert_fn(Variante).values(filas)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["gen_id", "notacion"],
+        set_={
+            "clasificacion": stmt.excluded.clasificacion,
+            "clinvar_id": func.coalesce(stmt.excluded.clinvar_id, Variante.clinvar_id),
+        },
+    )
+    db.session.execute(stmt)
     db.session.flush()
-    return resultado
+    return list(
+        db.session.scalars(
+            select(Variante)
+            .where(Variante.gen_id == gen_id, Variante.notacion.in_(notaciones))
+            .order_by(Variante.notacion.asc(), Variante.id.asc())
+            .execution_options(populate_existing=True)
+        ).all()
+    )
 
 
 def sincronizar_variantes_gen(gen_id: int, items: list[dict[str, Any]]) -> list[Variante]:
