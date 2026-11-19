@@ -2,10 +2,11 @@
 import pytest
 from flask import Flask
 from flask.testing import FlaskClient
-from src import create_app
 from src.core.database import db
 from src.core.models.base import Base
 from src.core.services.seguridad import tokens_revocados
+
+from src import create_app
 
 
 @pytest.fixture

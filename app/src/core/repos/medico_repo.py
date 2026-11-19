@@ -1,11 +1,20 @@
 """Repositorio de acceso a datos para medicos y especialidades."""
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from src.core.database import db
-from src.core.models import (Especialidad, Medico, MedicoEspecialidad, Rol, Usuario,)
+from src.core.models import (
+    Especialidad,
+    Medico,
+    MedicoEspecialidad,
+    Rol,
+    Usuario,
+)
 from src.core.repos import usuario_repo
-from src.core.services.excepciones import ErrorDominio
+from src.core.services.excepciones import ErrorBaseDatos, ErrorConflicto, ErrorDominio
 
+logger = logging.getLogger(__name__)
 
 def listar_especialidades() -> list[Especialidad]:
     """Devuelve todas las especialidades ordenadas alfabeticamente."""
@@ -90,4 +99,66 @@ def crear_medico_completo(
             codigo="ERROR_BASE_DATOS",
             http_status=503,
             reintentable=True,
+        ) from exc
+
+def crear_gerente_medico_completo(
+    *,
+    nombre: str,
+    apellido: str,
+    telefono: str,
+    email: str,
+    password_hash: str,
+    matricula: str,
+    especialidades_ids: list[int],
+) -> tuple[Usuario, Medico]:
+    """Crea Usuario (Rol.GERENTE_MEDICO), Medico y sus especialidades en una transaccion."""
+    try:
+        usuario = Usuario(
+            email=email,
+            password_hash=password_hash,
+            rol=Rol.GERENTE_MEDICO,
+            nombre=nombre,
+            apellido=apellido,
+            telefono=telefono,
+            debe_cambiar_password=False,
+        )
+        # flush() envia el INSERT sin cerrar la transaccion para obtener usuario.id
+        db.session.add(usuario)
+        db.session.flush()
+
+        medico = Medico(
+            usuario_id=usuario.id,
+            matricula=matricula,
+        )
+        # flush() genera medico.id antes de insertar la tabla intermedia
+        db.session.add(medico)
+        db.session.flush()
+
+        for especialidad_id in especialidades_ids:
+            db.session.add(
+                MedicoEspecialidad(
+                    medico_id=medico.id,
+                    especialidad_id=especialidad_id,
+                )
+            )
+
+        db.session.commit()
+        logger.info(
+            "step=3_alta_gerente_ok usuario_id=%s medico_id=%s matricula=%s",
+            usuario.id, medico.id, matricula,
+        )
+        return usuario, medico
+    except IntegrityError as exc:
+        # Cualquier conflicto UNIQUE concurrente revierte todo (no quedan usuarios huerfanos)
+        db.session.rollback()
+        logger.warning("abort_cleanup alta_gerente conflicto: %s", exc)
+        raise ErrorConflicto(
+            "Ya existe un usuario o médico con ese correo electrónico o matrícula.",
+            codigo="RECURSO_DUPLICADO_CONCURRENTE",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        logger.error("abort_cleanup alta_gerente db_error: %s", exc)
+        raise ErrorBaseDatos(
+            "Error temporal al registrar el gerente médico. Intente nuevamente.",
         ) from exc

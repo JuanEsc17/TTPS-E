@@ -16,7 +16,7 @@ from .web.api.logistica import logistica_bp
 from .web.api.medicos import medicos_bp
 from .web.api.patologias import patologias_bp
 from .web.handlers.errors import registrar_manejadores_errores
-
+from .web.api.admin_usuarios import admin_usuarios_bp  
 
 def _cargar_entorno(ruta_env: Path | None = None) -> None:
     """Carga variables desde `.env` sin sobrescribir las ya definidas en el entorno."""
@@ -72,5 +72,6 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(logistica_bp)
     app.register_blueprint(patologias_bp)
     app.register_blueprint(chatbot_bp)
-
+    app.register_blueprint(admin_usuarios_bp)   
+    
     return app
