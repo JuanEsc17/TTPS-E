@@ -15,7 +15,10 @@ const MENU_POR_ROL = {
         { to: "/medico/pacientes", label: "Pacientes" },
         { to: "/medico/pacientes/nuevo", label: "Alta de paciente" },
     ],
-    gerente_medico: [{ to: "/gerencia/patologias", label: "Patologías" }],
+    gerente_medico: [
+        { to: "/gerencia/patologias", label: "Patologías" },
+        { to: "/medico/estudios", label: "Estudios" },
+    ],
     administrativo: [{ to: "/administracion/estudios", label: "Carga de datos ACTG" }],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],
     transportista: [{ to: "/transporte/orden-del-dia", label: "Orden diaria" }],
@@ -62,9 +65,11 @@ export default function Layout({ sesion, onCerrarSesion }) {
     const itemActivo =
         pathname === "/cambiar-password"
             ? "Cambiar contraseña"
-            : pathname.endsWith("/turno")
-                ? "Turno de extracción"
-                : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
+            : pathname.endsWith("/resultado")
+                ? "Resultado del estudio"
+                : pathname.endsWith("/turno")
+                    ? "Turno de extracción"
+                    : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
 
     const contenidoSidebar = (
         <div className="relative flex h-full flex-col justify-between overflow-hidden bg-gradient-to-b from-[#062846] via-[#093D6B] to-[#0B4F8A] p-4 text-white">

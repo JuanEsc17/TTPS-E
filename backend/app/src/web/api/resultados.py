@@ -30,6 +30,16 @@ def _parsear_analisis_id_opcional() -> int | None:
     return valor
 
 
+@resultados_bp.get("/estudios/mis-estudios")
+@requiere_sesion()
+def listar_mis_estudios_resultados():
+    estudios = resultado_service.listar_estudios_usuario(usuario=g.usuario_actual)
+    resp = make_response(jsonify({"ok": True, "estudios": estudios}), 200)
+    resp.headers["Cache-Control"] = "private, no-store"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
 @resultados_bp.get("/estudios/<int:estudio_id>/resultado")
 @requiere_sesion()
 def consultar_resultado_estudio(estudio_id: int):

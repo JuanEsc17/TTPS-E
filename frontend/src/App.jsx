@@ -16,10 +16,10 @@ import SolicitarTurnoPage from "./pages/SolicitarTurnoPage";
 import MisTurnosPage from "./pages/MisTurnosPage";
 import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
+import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
+import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 
 const RUTAS_INICIO = [
-  { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
-  { path: "/medico/estudios", titulo: "Estudios médicos" },
   { path: "/admin/dashboard", titulo: "Administración general" },
 ];
 
@@ -30,24 +30,6 @@ function PanelPlaceholder({ titulo }) {
       <p className="mt-1 text-sm text-slate-600">
         Sesión iniciada correctamente desde un dispositivo conocido.
       </p>
-    </div>
-  );
-}
-
-function FlujoPendiente({ titulo, descripcion }) {
-  const { state } = useLocation();
-  return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-      <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h1 className="text-lg font-semibold text-slate-900">{titulo}</h1>
-        <p className="mt-2 text-sm text-slate-600">{descripcion}</p>
-        {state?.usuario?.email && (
-          <p className="mt-2 text-xs text-slate-500">Cuenta: {state.usuario.email}</p>
-        )}
-        <Link to="/login" className="mt-4 inline-block text-sm font-medium text-sky-600 hover:underline">
-          Volver al login
-        </Link>
-      </div>
     </div>
   );
 }
@@ -84,6 +66,9 @@ export default function App() {
         />
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
+          <Route path="/paciente/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
+          <Route path="/medico/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
+          <Route path="/estudios/:estudioId/resultado" element={<ResultadoEstudioPage sesion={sesion} />} />
           <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
           <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (

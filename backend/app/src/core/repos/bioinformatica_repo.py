@@ -88,6 +88,32 @@ def listar_estudios_por_estado(estado: EstadoEstudio) -> list[Estudio]:
     return list(db.session.scalars(stmt).all())
 
 
+def listar_estudios_de_paciente(usuario_id: int) -> list[Estudio]:
+    """Lista los estudios pertenecientes al paciente titular ordenados por mas reciente."""
+    stmt = (
+        select(Estudio)
+        .join(Paciente, Estudio.paciente_id == Paciente.id)
+        .where(Paciente.usuario_id == usuario_id)
+        .options(*_opciones_estudio_completo())
+        .order_by(Estudio.id.desc())
+    )
+    return list(db.session.scalars(stmt).all())
+
+
+def listar_estudios_de_medico(medico_id: int) -> list[Estudio]:
+    """Lista estudios derivados por el medico o con reanalisis solicitado por el."""
+    stmt = (
+        select(Estudio)
+        .where(
+            (Estudio.medico_id == medico_id)
+            | Estudio.analisis.any(Analisis.solicitado_por_id == medico_id)
+        )
+        .options(*_opciones_estudio_completo())
+        .order_by(Estudio.id.desc())
+    )
+    return list(db.session.scalars(stmt).all())
+
+
 def crear_datos_crudos(
     *,
     estudio_id: int,

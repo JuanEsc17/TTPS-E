@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
     consultarVariantesEstudioRequest,
     listarBandejaBioinformaticaRequest,
@@ -6,6 +7,7 @@ import {
     registrarVariantesAnalisisRequest,
     tomarEstudioBioinformaticaRequest,
 } from "../api/bioinformatica";
+import { descargarResultadoPdfRequest } from "../api/resultados";
 
 const BADGE_CLASIFICACION = {
     patogenica: {
@@ -55,6 +57,7 @@ export default function BioinformaticaPage({ sesion }) {
     const [seleccionadas, setSeleccionadas] = useState({});
     const [confirmarSinVariantes, setConfirmarSinVariantes] = useState(false);
     const [guardandoAnalisis, setGuardandoAnalisis] = useState(false);
+    const [descargandoPdf, setDescargandoPdf] = useState(false);
     const [error, setError] = useState("");
     const [errorVariantes, setErrorVariantes] = useState(null);
     const [resultadoFinal, setResultadoFinal] = useState(null);
@@ -265,6 +268,22 @@ export default function BioinformaticaPage({ sesion }) {
         }
     }
 
+    async function handleDescargarResultadoFinal() {
+        if (!token || !resultadoFinal?.estudio_id) return;
+        setDescargandoPdf(true);
+        setError("");
+        try {
+            await descargarResultadoPdfRequest({
+                token,
+                estudioId: resultadoFinal.estudio_id,
+            });
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setDescargandoPdf(false);
+        }
+    }
+
     if (!esBioinformatico) {
         return (
             <div className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
@@ -309,19 +328,37 @@ export default function BioinformaticaPage({ sesion }) {
             {resultadoFinal && (
                 <div
                     role="status"
-                    className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900"
+                    className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900"
                 >
-                    <p className="text-sm font-semibold">
-                        Análisis bioinformático registrado · Estudio #{resultadoFinal.estudio_id} ({resultadoFinal.estado_estudio})
-                    </p>
-                    <p className="mt-1">
-                        Diagnóstico: <strong className="uppercase">{resultadoFinal.resultado?.diagnostico}</strong> · Variantes registradas: {resultadoFinal.variantes_registradas?.length || 0} · PDF: <code className="font-mono">{resultadoFinal.resultado?.pdf_path}</code>
-                    </p>
-                    {resultadoFinal.resultado?.fecha_proximo_estudio && (
-                        <p className="mt-1 font-medium text-amber-900">
-                            Reevaluación anual por VUS programada para: {resultadoFinal.resultado.fecha_proximo_estudio}
+                    <div>
+                        <p className="text-sm font-semibold">
+                            Resultado informado · Estudio #{resultadoFinal.estudio_id} ({resultadoFinal.estado_estudio})
                         </p>
-                    )}
+                        <p className="mt-1">
+                            Diagnóstico: <strong className="uppercase">{resultadoFinal.resultado?.diagnostico}</strong> · Variantes registradas: {resultadoFinal.variantes_registradas?.length || 0} · Se notificó al paciente y al médico tratante.
+                        </p>
+                        {resultadoFinal.resultado?.fecha_proximo_estudio && (
+                            <p className="mt-1 font-medium text-amber-900">
+                                Reevaluación anual por VUS programada para: {resultadoFinal.resultado.fecha_proximo_estudio}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                            to={`/estudios/${resultadoFinal.estudio_id}/resultado`}
+                            className="rounded-xl bg-[#0B4F8A] px-3.5 py-2 font-semibold text-white transition hover:bg-[#093E6D]"
+                        >
+                            Ver resultado
+                        </Link>
+                        <button
+                            type="button"
+                            disabled={descargandoPdf}
+                            onClick={handleDescargarResultadoFinal}
+                            className="rounded-xl border border-emerald-700 bg-white px-3.5 py-2 font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+                        >
+                            {descargandoPdf ? "Descargando..." : "Descargar PDF"}
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -778,7 +815,7 @@ export default function BioinformaticaPage({ sesion }) {
                                         disabled={guardandoAnalisis}
                                         className="inline-flex items-center justify-center rounded-xl bg-[#0B4F8A] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#093E6D] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-2 disabled:opacity-50"
                                     >
-                                        {guardandoAnalisis ? "Registrando análisis..." : "Confirmar análisis y cargar resultado"}
+                                        {guardandoAnalisis ? "Generando informe PDF del resultado..." : "Confirmar análisis y cargar resultado"}
                                     </button>
                                 </div>
                             </div>

@@ -594,6 +594,68 @@ def _serializar_resultado_analisis(
     }
 
 
+def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
+    """Lista los estudios visibles para el usuario autenticado junto al resumen de su resultado."""
+    if usuario.rol not in _ROLES_PERMITIDOS_RESULTADO:
+        _denegar_acceso_resultado(0, usuario)
+
+    if usuario.rol == Rol.PACIENTE:
+        estudios = bioinformatica_repo.listar_estudios_de_paciente(usuario.id)
+    elif usuario.rol in (Rol.MEDICO, Rol.GERENTE_MEDICO):
+        medico = bioinformatica_repo.buscar_medico_por_usuario_id(usuario.id)
+        estudios = bioinformatica_repo.listar_estudios_de_medico(medico.id) if medico else []
+    else:
+        estudios = bioinformatica_repo.listar_estudios_por_estado(EstadoEstudio.RESULTADO_CARGADO)
+
+    items: list[dict[str, Any]] = []
+    for est in estudios:
+        completados = [a for a in est.analisis if a.resultado is not None]
+        tiene_resultado = est.estado == EstadoEstudio.RESULTADO_CARGADO and bool(completados)
+        ultimo = completados[-1] if tiene_resultado else None
+        res = ultimo.resultado if ultimo else None
+        pac_u = est.paciente.usuario if est.paciente else None
+        med_u = est.medico.usuario if est.medico else None
+
+        items.append(
+            {
+                "estudio_id": est.id,
+                "estado": est.estado.value,
+                "patologia": est.patologia_sospechada.nombre if est.patologia_sospechada else "",
+                "es_pompe_urgente": bool(est.es_pompe_urgente),
+                "paciente": {
+                    "id": est.paciente_id,
+                    "nombre": f"{pac_u.nombre} {pac_u.apellido}".strip() if pac_u else "",
+                    "dni": est.paciente.dni if est.paciente else "",
+                },
+                "medico_nombre": f"{med_u.nombre} {med_u.apellido}".strip() if med_u else "",
+                "fecha_reevaluacion_vus": (
+                    est.fecha_reevaluacion_vus.isoformat() if est.fecha_reevaluacion_vus else None
+                ),
+                "tiene_resultado": tiene_resultado,
+                "resultado": (
+                    {
+                        "resultado_id": res.id,
+                        "analisis_id": ultimo.id,
+                        "tipo_analisis": ultimo.tipo.value,
+                        "positivo": bool(res.positivo),
+                        "diagnostico": res.diagnostico.value,
+                        "fecha_proximo_estudio": (
+                            res.fecha_proximo_estudio.isoformat()
+                            if res.fecha_proximo_estudio
+                            else None
+                        ),
+                        "generado_en": res.generado_en.isoformat() if res.generado_en else None,
+                        "cantidad_variantes": len(ultimo.variantes),
+                    }
+                    if (ultimo is not None and res is not None)
+                    else None
+                ),
+                "updated_at": est.updated_at.isoformat() if est.updated_at else None,
+            }
+        )
+    return items
+
+
 def consultar_resultado_estudio(*, estudio_id: int, usuario: Usuario) -> dict[str, Any]:
     """STEP 4: Devuelve el detalle del resultado actual y el historial de resultados del estudio."""
     estudio, analisis_actual, resultado_actual, completados = (

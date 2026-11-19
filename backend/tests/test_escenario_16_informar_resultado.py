@@ -950,3 +950,56 @@ def test_idempotencia_duplicados_y_conflicto_doble_carga(
     assert dup_res.status_code == 409
     assert dup_res.get_json()["code"] == "RESULTADO_YA_EXISTE_PARA_ANALISIS"
 
+
+def test_listar_mis_estudios_resultados_aislamiento_por_rol(app, client, datos_escenario_16):
+    """GET /api/estudios/mis-estudios aisla estudios por titularidad y bloquea roles ajenos."""
+    assert _cargar_resultado_http(
+        app, client, datos_escenario_16, [datos_escenario_16["v_pat"].id]
+    ).status_code == 200
+    estudio_id = datos_escenario_16["estudio"].id
+
+    # Paciente titular ve su estudio con resultado
+    r_pac = client.get(
+        "/api/estudios/mis-estudios",
+        headers=_headers_para(app, datos_escenario_16["u_paciente"]),
+    )
+    assert r_pac.status_code == 200
+    assert r_pac.headers.get("Cache-Control") == "private, no-store"
+    estudios_pac = r_pac.get_json()["estudios"]
+    assert len(estudios_pac) == 1
+    assert estudios_pac[0]["estudio_id"] == estudio_id
+    assert estudios_pac[0]["tiene_resultado"] is True
+    assert estudios_pac[0]["resultado"]["diagnostico"] == "positivo"
+
+    # Paciente ajeno ve lista vacia (no fuga estudios de terceros)
+    r_otro_pac = client.get(
+        "/api/estudios/mis-estudios",
+        headers=_headers_para(app, datos_escenario_16["u_paciente_otro"]),
+    )
+    assert r_otro_pac.status_code == 200
+    assert r_otro_pac.get_json()["estudios"] == []
+
+    # Medico tratante ve el estudio; medico no vinculado ve lista vacia
+    r_med = client.get(
+        "/api/estudios/mis-estudios",
+        headers=_headers_para(app, datos_escenario_16["u_medico"]),
+    )
+    assert r_med.status_code == 200
+    assert [e["estudio_id"] for e in r_med.get_json()["estudios"]] == [estudio_id]
+
+    r_med_otro = client.get(
+        "/api/estudios/mis-estudios",
+        headers=_headers_para(app, datos_escenario_16["u_medico_otro"]),
+    )
+    assert r_med_otro.status_code == 200
+    assert r_med_otro.get_json()["estudios"] == []
+
+    # Rol no permitido -> 403
+    r_admin = client.get(
+        "/api/estudios/mis-estudios",
+        headers=_headers_para(app, datos_escenario_16["u_admin"]),
+    )
+    assert r_admin.status_code == 403
+    assert r_admin.get_json()["code"] == "FORBIDDEN_RESULTADO_GENETICO"
+
+
