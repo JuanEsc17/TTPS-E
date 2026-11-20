@@ -16,6 +16,7 @@ import SolicitarTurnoPage from "./pages/SolicitarTurnoPage";
 import MisTurnosPage from "./pages/MisTurnosPage";
 import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
+import RegistroMuestraAdminPage from "./pages/RegistroMuestraAdminPage";
 
 const RUTAS_INICIO = [
   { path: "/paciente/estudios", titulo: "Mis estudios (Paciente)" },
@@ -100,6 +101,10 @@ export default function App() {
           <Route
             path="/administracion/estudios"
             element={<DatosCrudosAdminPage sesion={sesion} />}
+          />
+          <Route
+            path="/administracion/muestras"
+            element={<RegistroMuestraAdminPage sesion={sesion} />}
           />
           <Route
             path="/bioinformatica/cola"

@@ -16,7 +16,10 @@ const MENU_POR_ROL = {
         { to: "/medico/pacientes/nuevo", label: "Alta de paciente" },
     ],
     gerente_medico: [{ to: "/gerencia/patologias", label: "Patologías" }],
-    administrativo: [{ to: "/administracion/estudios", label: "Carga de datos ACTG" }],
+    administrativo: [
+        { to: "/administracion/muestras", label: "Registro de muestras" },
+        { to: "/administracion/estudios", label: "Carga de datos ACTG" },
+    ],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],
     transportista: [{ to: "/transporte/orden-del-dia", label: "Orden diaria" }],
     admin_general: [{ to: "/admin/dashboard", label: "Panel general" }],
