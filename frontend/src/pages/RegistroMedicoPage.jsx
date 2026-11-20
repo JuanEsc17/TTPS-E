@@ -21,6 +21,7 @@ export default function RegistroMedicoPage({ sesion }) {
     const [enviando, setEnviando] = useState(false);
     const [error, setError] = useState("");
     const [codigoError, setCodigoError] = useState("");
+    const [erroresCampos, setErroresCampos] = useState({});
     const [registroExitoso, setRegistroExitoso] = useState(null);
 
     async function cargarEspecialidades() {
@@ -50,14 +51,42 @@ export default function RegistroMedicoPage({ sesion }) {
         );
     }
 
+    function validarFormulario() {
+        const errs = {};
+        if (!nombre.trim()) errs.nombre = "Ingresá tu nombre.";
+        if (!apellido.trim()) errs.apellido = "Ingresá tu apellido.";
+        if (!matricula.trim()) errs.matricula = "Ingresá tu matrícula profesional.";
+
+        const tel = telefono.trim();
+        const digitosTel = (tel.match(/\d/g) || []).length;
+        if (!tel || !/^\+?[\d\s\-()]{7,20}$/.test(tel) || digitosTel < 7) {
+            errs.telefono = "Ingresá un teléfono válido (solo números, al menos 7 dígitos).";
+        }
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+            errs.email = "Ingresá un correo electrónico válido.";
+        }
+
+        if (password.length < 8 || !/[A-Za-z]/.test(password) || !/\d/.test(password)) {
+            errs.password = "La contraseña debe tener como mínimo 8 caracteres, al menos una letra y un número.";
+        }
+
+        if (especialidadesIds.length === 0) {
+            errs.especialidades = "Seleccioná al menos una especialidad médica.";
+        }
+
+        return errs;
+    }
+
     async function handleSubmit(e) {
         e.preventDefault();
         setError("");
         setCodigoError("");
 
-        if (especialidadesIds.length === 0) {
-            setError("Debe seleccionar al menos una especialidad médica.");
-            setCodigoError("DATOS_MEDICO_INVALIDOS");
+        const errs = validarFormulario();
+        setErroresCampos(errs);
+        if (Object.keys(errs).length > 0) {
+            setError("Revisá los campos marcados antes de continuar.");
             return;
         }
 
@@ -183,7 +212,7 @@ export default function RegistroMedicoPage({ sesion }) {
                                 </div>
                             )}
 
-                            <form onSubmit={handleSubmit} className="space-y-4">
+                            <form onSubmit={handleSubmit} noValidate className="space-y-4">
                                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                     <div>
                                         <label htmlFor="med-nombre" className="mb-1.5 block text-xs font-medium text-slate-700">
@@ -192,12 +221,14 @@ export default function RegistroMedicoPage({ sesion }) {
                                         <input
                                             id="med-nombre"
                                             type="text"
-                                            required
                                             placeholder="Martín"
                                             value={nombre}
                                             onChange={(e) => setNombre(e.target.value)}
-                                            className={inputNormal}
+                                            className={erroresCampos.nombre ? inputError : inputNormal}
                                         />
+                                        {erroresCampos.nombre && (
+                                            <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.nombre}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <label htmlFor="med-apellido" className="mb-1.5 block text-xs font-medium text-slate-700">
@@ -206,12 +237,14 @@ export default function RegistroMedicoPage({ sesion }) {
                                         <input
                                             id="med-apellido"
                                             type="text"
-                                            required
                                             placeholder="Gómez"
                                             value={apellido}
                                             onChange={(e) => setApellido(e.target.value)}
-                                            className={inputNormal}
+                                            className={erroresCampos.apellido ? inputError : inputNormal}
                                         />
+                                        {erroresCampos.apellido && (
+                                            <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.apellido}</p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -223,13 +256,15 @@ export default function RegistroMedicoPage({ sesion }) {
                                         <input
                                             id="med-matricula"
                                             type="text"
-                                            required
                                             maxLength={50}
                                             placeholder="MP-114523"
                                             value={matricula}
                                             onChange={(e) => setMatricula(e.target.value)}
-                                            className={codigoError === "MATRICULA_YA_REGISTRADA" ? inputError : inputNormal}
+                                            className={codigoError === "MATRICULA_YA_REGISTRADA" || erroresCampos.matricula ? inputError : inputNormal}
                                         />
+                                        {erroresCampos.matricula && (
+                                            <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.matricula}</p>
+                                        )}
                                     </div>
                                     <div>
                                         <label htmlFor="med-telefono" className="mb-1.5 block text-xs font-medium text-slate-700">
@@ -238,13 +273,15 @@ export default function RegistroMedicoPage({ sesion }) {
                                         <input
                                             id="med-telefono"
                                             type="tel"
-                                            required
                                             maxLength={30}
                                             placeholder="+5492214448899"
                                             value={telefono}
                                             onChange={(e) => setTelefono(e.target.value)}
-                                            className={inputNormal}
+                                            className={erroresCampos.telefono ? inputError : inputNormal}
                                         />
+                                        {erroresCampos.telefono && (
+                                            <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.telefono}</p>
+                                        )}
                                     </div>
                                 </div>
 
@@ -255,13 +292,15 @@ export default function RegistroMedicoPage({ sesion }) {
                                     <input
                                         id="med-email"
                                         type="email"
-                                        required
                                         autoComplete="email"
                                         placeholder="martin.gomez@hospital.org.ar"
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
-                                        className={codigoError === "EMAIL_YA_REGISTRADO" ? inputError : inputNormal}
+                                        className={codigoError === "EMAIL_YA_REGISTRADO" || erroresCampos.email ? inputError : inputNormal}
                                     />
+                                    {erroresCampos.email && (
+                                        <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.email}</p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -272,12 +311,11 @@ export default function RegistroMedicoPage({ sesion }) {
                                         <input
                                             id="med-password"
                                             type={mostrarPassword ? "text" : "password"}
-                                            required
                                             autoComplete="new-password"
-                                            placeholder="Mínimo 8 caracteres, letras y números"
+                                            placeholder="Mínimo 8 caracteres, al menos una letra y un número"
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
-                                            className={`${inputNormal} pr-14`}
+                                            className={`${erroresCampos.password ? inputError : inputNormal} pr-14`}
                                         />
                                         <button
                                             type="button"
@@ -287,6 +325,9 @@ export default function RegistroMedicoPage({ sesion }) {
                                             {mostrarPassword ? "Ocultar" : "Ver"}
                                         </button>
                                     </div>
+                                    {erroresCampos.password && (
+                                        <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.password}</p>
+                                    )}
                                 </div>
 
                                 <div>

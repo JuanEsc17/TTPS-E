@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 3 – Emitir un presupuesto
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-3`
@@ -12,15 +12,15 @@
 | Categoría LEL | Símbolos utilizados |
 |---|---|
 | **Sujetos** | `Administrativo`, `Paciente` |
-| **Objetos** | `Estudio`, `Gen`, `Presupuesto`, `Obra social`, `API de obras sociales`, `Aviso` |
-| **Verbos** | `Pagar presupuesto` *(habilitado a continuación)* |
+| **Objetos** | `Estudio`, `Gen`, `Presupuesto`, `Obra social`, `API de obras sociales`, `Cuota`, `API de MercadoPago`, `Registro de modificaciones`, `Aviso` |
+| **Verbos** | `Pagar presupuesto`, `Registrar modificación` *(habilitado a continuación)* |
 | **Estados** | `Creado`, `Pendiente de autorización` |
 
 ---
 
 ## Overview
 
-- **Objetivo**: Determinar el costo en dólares del `Estudio` de exoma clínico solicitado (incluyendo la extracción en un único pago) y registrar el `Presupuesto` correspondiente para que el `Paciente` lo abone de forma particular o se tramite la autorización por su `Obra social`.
+- **Objetivo**: Determinar el costo en dólares del `Estudio` de exoma clínico solicitado (incluyendo la extracción, abonable en un solo pago o en `Cuotas` mediante `MercadoPago`) y registrar el `Presupuesto` correspondiente para que el `Paciente` lo abone de forma particular o se tramite la autorización por su `Obra social`.
 - **Contexto**: El `Médico` dio de alta un `Estudio` de exoma clínico (en estado `Creado`) y el `Administrativo` del laboratorio central debe emitir su `Presupuesto`. Según el LEL y `app/src/core/models/reglas.py`, el precio fijo es de **500 USD hasta 5 genes** (`PRECIO_BASE_USD = 500`, `GENES_INCLUIDOS = 5`) y **30 USD por cada gen adicional** (`PRECIO_GEN_ADICIONAL_USD = 30`).
 - **Recursos**: `Estudio` (`estudio_id`), cantidad total de `Genes` asociados en `estudios_genes`, función de dominio `calcular_precio(cantidad_genes)`, `Obra social` (si el estudio/paciente utiliza cobertura), `Presupuesto`.
 - **Episodios**:
@@ -121,9 +121,10 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 2. Evalúa la modalidad de financiación del `Estudio`:
    - **Si `estudio.obra_social_id is not None`**:
      - Cambia `estudio.estado = EstadoEstudio.PENDIENTE_AUTORIZACION` (`"Pendiente de autorizacion"`).
+     - Registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `cambios = {"estado": {"anterior": "Creado", "nuevo": "Pendiente de autorizacion"}}`).
      - Inserta una fila inicial en `autorizaciones` con `estudio_id = estudio.id`, `resultado = ResultadoAutorizacion.PENDIENTE`, `solicitud_externa_id = solicitud_externa_id`.
    - **Si `estudio.obra_social_id is None` (Pago particular)**:
-     - Mantiene `estudio.estado = EstadoEstudio.CREADO` (a la espera del pago particular o de que el paciente seleccione obra social).
+     - Mantiene `estudio.estado = EstadoEstudio.CREADO` (a la espera del pago particular en un pago o en cuotas vía `MercadoPago`, o de que el paciente seleccione obra social).
 3. Inserta un `Aviso` en `avisos` para el `Paciente` (`usuario_id = estudio.paciente.usuario_id`, `canal = CanalAviso.APP` y `CanalAviso.MAIL`) informando que el `Presupuesto` de `monto_total_usd` USD ya está disponible.
 4. Ejecuta `session.commit()`.
 **Timeout**: `4s`
@@ -297,3 +298,4 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/economia.py` y `reglas.py`. | Marcada como `Approved`. |
+| 2026-11-17 | Actualizada por nuevos requerimientos: habilitación de pago en cuotas con `MercadoPago` (Esc. 06/38) y auditoría en `registro_modificaciones` al transicionar estado del `Estudio`. | Actualizada a v1.1. |

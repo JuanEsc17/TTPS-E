@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 15 – Analizar un estudio mediante bioinformática
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-15-Analizar-un-estudio-mediante-bioinformatica`
 
@@ -19,8 +19,10 @@
 | **Objeto** | `Variante` | `Variante` en `variantes` y `AnalisisVariante` en `analisis_variantes` |
 | **Objeto** | `VUS` | `ClasificacionVariante.VUS` (`"vus"`) |
 | **Objeto** | `API de bioinformática` | Cliente HTTP en `app/src/clients/` |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` *(auditoría de `Estudio`)* |
 | **Objeto** | `Aviso` | `Aviso` en `avisos` (notificación al mail compartido del equipo de bioinformática) |
 | **Verbo** | `Cargar resultado` | Carga de variantes del `Analisis` que desemboca en `Resultado cargado` (Escenario 16) |
+| **Verbo** | `Registrar modificación` | Asiento atómico en `registro_modificaciones` |
 | **Estado** | `En viaje a Corea` | `EstadoEstudio.EN_VIAJE_COREA` (`"En viaje a Corea"`) |
 | **Estado** | `En análisis por bioinformática` | `EstadoEstudio.EN_ANALISIS_BIOINFORMATICA` (`"En analisis por bioinformatica"`) |
 | **Estado** | `En análisis de un bioinformático` | `EstadoEstudio.EN_ANALISIS_BIOINFORMATICO` (`"En analisis de un bioinformatico"`) |
@@ -86,7 +88,7 @@
 2. Valida que el archivo de `Datos crudos` no esté vacío y contenga únicamente caracteres válidos de bases nucleotídicas (`A`, `C`, `T`, `G` y saltos de línea/encabezados permitidos).
 3. Guarda el archivo en almacenamiento (`storage/datos_crudos/estudio_{estudio_id}.txt`) e inserta una fila en `datos_crudos` (`estudio_id`, `cargado_por_id = usuario.id`, `archivo_path`, `cargado_en = now()`).
 4. Crea la fila de `Analisis` inicial en la tabla `analisis` con `estudio_id = estudio.id`, `tipo = TipoAnalisis.INICIAL`, `bioinformatico_id = None`, y copia en `analisis_genes` los `gen_id` de `estudio.genes` (`estudios_genes`).
-5. Actualiza `estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICA`.
+5. Actualiza `estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICA` y registra la carga de `Datos crudos` y el cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = usuario.id`, `cambios = {"estado": {"anterior": "En viaje a Corea", "nuevo": "En analisis por bioinformatica"}, "datos_crudos_id": {"anterior": None, "nuevo": datos_crudos.id}}`).
 6. Crea `Aviso`s (`CanalAviso.APP` y `CanalAviso.MAIL`) para los integrantes del equipo de bioinformática (`Rol.BIOINFORMATICO`) y envía correo al mail compartido del equipo avisando que el estudio (indicando si es `Pompe urgente`) está disponible para analizar.
 **Timeout**: 10s
 **Input**: `multipart/form-data` con archivo `archivo_datos_crudos` o JSON `{ "contenido_actg": "ATCGGCTA..." }` para `estudio_id = 42`.
@@ -115,7 +117,7 @@
 1. Al listar la bandeja (`GET /api/bioinformatica/estudios`), el sistema devuelve los estudios en `EstadoEstudio.EN_ANALISIS_BIOINFORMATICA` ordenados por `Estudio.es_pompe_urgente.desc(), Estudio.updated_at.asc()` para garantizar que cualquier `Pompe urgente` aparezca primero.
 2. Cuando un `Bioinformático` decide tomar un `Estudio` (`POST /api/bioinformatica/estudios/{estudio_id}/tomar`), el sistema bloquea la fila de `estudios` (`SELECT ... FOR UPDATE`).
 3. Verifica que `estudio.estado == EstadoEstudio.EN_ANALISIS_BIOINFORMATICA`.
-4. Asigna `analisis_activo.bioinformatico_id = usuario_bioinformatico.id` en la tabla `analisis` y cambia `estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICO` en `estudios` para informar al resto del equipo de bioinformática que el estudio ya fue tomado.
+4. Asigna `analisis_activo.bioinformatico_id = usuario_bioinformatico.id` en la tabla `analisis`, cambia `estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICO` en `estudios` y registra la asignación/cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `usuario_id = usuario_bioinformatico.id`, `cambios = {"estado": {"anterior": "En analisis por bioinformatica", "nuevo": "En analisis de un bioinformatico"}, "bioinformatico_id": {"anterior": None, "nuevo": usuario_bioinformatico.id}}`).
 **Timeout**: 3s
 **Input**: `{ estudio_id: 42, bioinformatico_usuario_id: 14 }`
 **Output on SUCCESS**: `{ estudio_id: 42, analisis_id: 25, bioinformatico_id: 14, estado_estudio: "En analisis de un bioinformatico", genes_a_analizar: [...] }` -> GO TO STEP 3
@@ -388,6 +390,7 @@ Estudio (EstadoEstudio):
 |---|---|---|---|---|
 | RC-1 | En `app/src/core/models/analisis.py`, `DatosCrudos` tiene `estudio_id` único, mientras que `Analisis` tiene relación `1..N` con `Estudio` (`tipo: TipoAnalisis.INICIAL | REANALISIS`), `AnalisisGen` (`analisis_genes`) y `AnalisisVariante` (`analisis_variantes`). | Low | STEP 1 & STEP 4 | La especificación crea `Analisis(tipo=TipoAnalisis.INICIAL)` con sus `AnalisisGen` al cargar los `DatosCrudos` y registra las `AnalisisVariante` al finalizar el análisis. |
 | RC-2 | En `app/src/core/models/enums.py`, `ClasificacionVariante` incluye las 4 categorías del LEL: `PATOGENICA = "patogenica"`, `BENIGNA = "benigna"`, `INOCUA = "inocua"`, `VUS = "vus"`. | Low | STEP 3 & STEP 4 | Alineado 100% con `enums.py#L49-L53`. |
+| RC-3 | **[BRECHA DETECTADA]** Toda transición de estado del `Estudio` en STEP 1 y STEP 2 requiere llamada transaccional a `AuditoriaService.registrar_modificacion(...)`, pendiente de implementación en `app/src/core/`. | Medium | STEP 1, STEP 2 | Incorporar `AuditoriaService` al implementar `BioinformaticaService`. |
 
 ---
 
@@ -420,3 +423,4 @@ Estudio (EstadoEstudio):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/analisis.py`, `clinica.py`, `estudios.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimiento 6 (ADR-003): agregada auditoría en `registro_modificaciones` sobre `Estudio` en STEP 1 y STEP 2 y documentada brecha RC-3. | Especificación actualizada. |

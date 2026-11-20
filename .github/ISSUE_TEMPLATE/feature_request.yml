@@ -1,0 +1,79 @@
+name: Solicitud de Funcionalidad o Mejora
+description: Proponer una nueva funcionalidad, escenario SDD o mejora técnica
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Las nuevas funcionalidades deben alinearse con el flujo Spec-Driven Development (SDD): respetar las especificaciones en `docs/specs/`, los escenarios de `.ai/3-Escenarios.md` y el vocabulario oficial de `.ai/2-Glosario_LEL.md`.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área del proyecto
+      description: Seleccioná qué parte del sistema abarca principalmente esta solicitud.
+      options:
+        - Fullstack (Backend + Frontend)
+        - Backend (backend/app/)
+        - Frontend (frontend/)
+        - Especificaciones SDD / Documentación (docs/specs/)
+        - Base de datos / Migraciones
+        - Integraciones externas (backend/app/src/clients/)
+        - Testing / Calidad / CI
+    validations:
+      required: true
+
+  - type: input
+    id: escenario
+    attributes:
+      label: Escenario / Spec asociada
+      description: Referencia al escenario en `.ai/3-Escenarios.md` o archivo en `docs/specs/` (si corresponde).
+      placeholder: "Ej.: Escenario 18 - docs/specs/escenario-18-gestionar-la-informacion-familiar.md"
+    validations:
+      required: false
+
+  - type: textarea
+    id: problema
+    attributes:
+      label: Problema o necesidad
+      description: Describí el problema actual, requerimiento pendiente o mejora buscada.
+      placeholder: "Actualmente falta implementar el flujo para..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solucion
+    attributes:
+      label: Solución propuesta
+      description: Detallá el comportamiento esperado, endpoints o componentes a crear y cambios técnicos sugeridos.
+    validations:
+      required: true
+
+  - type: textarea
+    id: criterios
+    attributes:
+      label: Criterios de aceptación
+      description: Listá las condiciones verificables que deben cumplirse para dar el issue por completado.
+      value: |
+        - [ ] Spec definida o actualizada en `docs/specs/`
+        - [ ] Implementación respetando capas (`router` -> `service` -> `repo` + `clients`) y dominio en español
+        - [ ] Tests unitarios/integración en `backend/tests/` cubriendo los criterios de aceptación
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternativas
+    attributes:
+      label: Alternativas consideradas o notas adicionales
+      description: Opcional. Comentá otras opciones evaluadas o dependencias requeridas (no agregar dependencias en `backend/pyproject.toml` sin consenso).
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: alineacion
+    attributes:
+      label: Verificación de dominio y SDD
+      options:
+        - label: Verifiqué que los nombres de modelos, estados y variables de negocio propuestos usan el vocabulario en español de `.ai/2-Glosario_LEL.md`.
+          required: false

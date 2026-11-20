@@ -1,7 +1,7 @@
 # WORKFLOW: Escenario 14 – Enviar una muestra de Pompe urgente
-**Versión**: 1.0
-**Fecha**: 2026-10-28
-**Autor**: Workflow Architect
+**Versión**: 1.1
+**Fecha**: 2026-11-17
+**Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-14-Enviar-una-muestra-de-Pompe-urgente`
 
@@ -20,8 +20,10 @@
 | **Objeto** | `CSV` | `SampleSet.csv_path` |
 | **Objeto** | `Autorización del Ministerio` | `SampleSet.autorizacion_ministerio_pdf_path` |
 | **Objeto** | `FedEx` | Retiro del paquete urgente (`SampleSet.retiro_fedex_*`) |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` *(auditoría de `sample_set` y `estudio`)* |
 | **Verbo** | `Armar sample set` | Cierre inmediato del `Sample set` parcial al ingresar un `Pompe urgente` |
 | **Verbo** | `Retirar sample set` | Programación y retiro del paquete hacia Corea |
+| **Verbo** | `Registrar modificación` | Asiento atómico en `registro_modificaciones` |
 | **Estado** | `En laboratorio central` | `EstadoEstudio.EN_LAB_CENTRAL` (`"En laboratorio central"`) |
 | **Estado** | `En espera de retiro` | `EstadoEstudio.EN_ESPERA_RETIRO` (`"En espera de retiro"`) |
 | **Estado** | `En viaje a Corea` | `EstadoEstudio.EN_VIAJE_COREA` (`"En viaje a Corea"`) / `EstadoSampleSet.EN_VIAJE_COREA` |
@@ -59,7 +61,7 @@
 - Existe un `Paciente` en `pacientes` cuya edad al momento del alta del `Estudio` es estrictamente menor a 4 meses (`fecha_referencia < fecha_nacimiento + 4 meses`).
 - El `Estudio` en `estudios` tiene `patologia_sospechada` correspondiente a `"Pompe"` y por lo tanto tiene `estudio.es_pompe_urgente == True`.
 - El `Estudio` cumplió el circuito único previo (pago o autorización de obra social, reserva de `Turno`, toma de `Muestra` en `Centro de extracción` y traslado por el `Transportista` hasta el laboratorio central).
-- La `Muestra` vigente tiene volumen apto (`mililitros >= Decimal("2")`).
+- La `Muestra` vigente tiene `motivo_descarte IS NULL` y `sample_set_id IS NULL` *(sin restricción de volumen mínimo `< 2 ml`, eliminada según ADR-004 / Requerimiento 5)*.
 
 ---
 
@@ -74,13 +76,13 @@ El `Transportista` registra la llegada al laboratorio central (`POST /api/logist
 ### STEP 1: Identificación del caso de Pompe urgente en el laboratorio central
 **Actor**: `service` (`LogisticaService.procesar_ingreso_muestra_lab_central`) -> `repo` (`MuestraRepo`, `EstudioRepo`)
 **Action**:
-1. Al ingresar la `Muestra` al laboratorio central y validar que su volumen sea `>= ML_MINIMOS_TUBO` (`2.00` ml), el sistema inspecciona `muestra.estudio`.
+1. Al ingresar la `Muestra` al laboratorio central y validar que `muestra.motivo_descarte IS NULL` y `estudio.estado == EstadoEstudio.EN_LAB_CENTRAL` *(sin ningún chequeo ni rechazo por volumen `< 2 ml`, eliminado según ADR-004)*, el sistema inspecciona `muestra.estudio`.
 2. Verifica la condición de `Pompe urgente`: `estudio.es_pompe_urgente == True` (determinada al dar de alta el `Estudio` verificando que `patologia_sospechada.nombre.lower() == "pompe"` y que la edad de `estudio.paciente.fecha_nacimiento` sea `< 4 meses`).
-**Timeout**: 2s
-**Input**: `{ muestra_id: 155, estudio_id: 48, mililitros: "2.50" }`
+**Timeout**: `2s`
+**Input**: `{ muestra_id: 155, estudio_id: 48 }`
 **Output on SUCCESS**: `{ muestra_id: 155, estudio_id: 48, es_pompe_urgente: true }` -> GO TO STEP 2
 **Output on FAILURE**:
-  - `FAILURE(volumen_insuficiente)`: Si `mililitros < 2.00`, aun siendo un `Pompe urgente`, la muestra no puede enviarse a Corea sin volumen mínimo -> se descarta con `MotivoDescarte.VOLUMEN_INSUFICIENTE` y se dispara el **Escenario 10** (`Remuestrear un estudio`) con notificación urgente al `Paciente` (padre/responsable) y al `Médico`.
+  - `FAILURE(invalid_state)`: Si `muestra.motivo_descarte IS NOT NULL` o `estudio.estado != EstadoEstudio.EN_LAB_CENTRAL` -> `return 409 Conflict` (`code: "MUESTRA_NO_APTA_PARA_SAMPLE_SET"`).
 
 **Observable states during this step**:
   - Customer/Actor (`Paciente` / padre responsable) sees: `Estudio` ingresado en `En laboratorio central`.
@@ -99,7 +101,8 @@ El `Transportista` registra la llegada al laboratorio central (`POST /api/logist
    - `sample_set.es_pompe_urgente = True`
    - `sample_set.estado = EstadoSampleSet.CERRADO`
    - `sample_set.cerrado_en = now()`
-4. Actualiza el estado de **todos** los `Estudio`s cuyas muestras integran ese `SampleSet` parcial (tanto el `Pompe urgente` como las muestras normales que ya estaban en ese lote abierto) de `EstadoEstudio.EN_LAB_CENTRAL` a `EstadoEstudio.EN_ESPERA_RETIRO`.
+   - Registra creación/cierre del `SampleSet` en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `accion = 'cambio_estado'`).
+4. Actualiza el estado de **todos** los `Estudio`s cuyas muestras integran ese `SampleSet` parcial (tanto el `Pompe urgente` como las muestras normales que ya estaban en ese lote abierto) de `EstadoEstudio.EN_LAB_CENTRAL` a `EstadoEstudio.EN_ESPERA_RETIRO`, asentando cada transición en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `accion = 'cambio_estado'`).
 5. Genera un `Aviso` prioritario en `avisos` para todos los usuarios con `Rol.ADMINISTRATIVO` alertando que se cerró un `SampleSet` parcial por `Pompe urgente`.
 **Timeout**: 5s
 **Input**: `{ sample_set_id: 13, muestra_urgente_id: 155 }`
@@ -122,7 +125,7 @@ El `Transportista` registra la llegada al laboratorio central (`POST /api/logist
 **Actor**: `service` -> `clients` (`MinisterioSaludClient`) -> `repo` (`SampleSetRepo`)
 **Action**:
 1. Genera automáticamente el archivo `CSV` incluyendo únicamente los `N` pacientes (`1 <= N <= 10`) que conforman el `SampleSet` parcial cerrado (de modo que el permiso coincida exactamente con los tubos físicos dentro de la bolsa sellada).
-2. Envía el `CSV` a la `API del Ministerio de Salud` y guarda el PDF recibido en `sample_set.autorizacion_ministerio_pdf_path`.
+2. Envía el `CSV` a la `API del Ministerio de Salud`, guarda el PDF recibido en `sample_set.autorizacion_ministerio_pdf_path` y registra tanto `csv_path` como `autorizacion_ministerio_pdf_path` en `registro_modificaciones` (`entidad_tipo = 'sample_set'`).
 **Timeout**: 15s
 **Input**: `{ sample_set_id: 13 }`
 **Output on SUCCESS**: `{ csv_path: "storage/sample_sets/sample_set_13.csv", autorizacion_ministerio_pdf_path: "storage/sample_sets/autorizacion_ministerio_13.pdf" }` -> GO TO STEP 4
@@ -164,9 +167,9 @@ El `Transportista` registra la llegada al laboratorio central (`POST /api/logist
 ### STEP 5: Retiro del paquete y transición del Sample Set parcial a `En viaje a Corea`
 **Actor**: `FedEx` -> `router` (`POST /api/webhooks/fedex/sample-sets/{sample_set_id}/retirado`) -> `service` -> `repo`
 **Action**: Cuando `FedEx` retira el paquete en el horario programado e invoca el callback:
-1. Actualiza `sample_set.estado = EstadoSampleSet.EN_VIAJE_COREA`.
-2. Actualiza todos los `Estudio`s incluidos en el `SampleSet` parcial a `EstadoEstudio.EN_VIAJE_COREA`.
-3. El flag `estudio.es_pompe_urgente = True` se conserva en `estudios` para que, una vez cargados los `Datos crudos` de Corea (Escenario 15), el estudio aparezca **primero en la lista** de trabajo del `Bioinformático`.
+1. Actualiza `sample_set.estado = EstadoSampleSet.EN_VIAJE_COREA` y registra el cambio en `registro_modificaciones` (`entidad_tipo = 'sample_set'`, `origen = 'webhook_fedex'`).
+2. Actualiza todos los `Estudio`s incluidos en el `SampleSet` parcial a `EstadoEstudio.EN_VIAJE_COREA` y registra cada cambio de estado en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `origen = 'webhook_fedex'`).
+3. El flag `estudio.es_pompe_urgente = True` se conserva en `estudios` para que, una vez cargados los `Datos crudos` de Corea (Escenario 15), el estudio aparezca **primero en la lista** de trabajo del `Bioinformático`. *(Asimismo, las actualizaciones de `csv_path`, `autorizacion_ministerio_pdf_path` y `retiro_fedex_*` en STEP 3–4 también se registran en `registro_modificaciones` sobre `sample_set`.)*
 **Timeout**: 5s
 **Input**: `{ sample_set_id: 13, pedido_id: "FDX-2026-0013", retirado_en: "2026-10-28T17:00:00" }`
 **Output on SUCCESS**: `{ sample_set_id: 13, estado_sample_set: "en_viaje_a_corea", estudios_en_viaje_ids: [43, 44, 45, 46, 47, 48] }` -> FIN DEL WORKFLOW.
@@ -216,9 +219,7 @@ Estudio de Pompe urgente y demás Estudios del mismo SampleSet parcial (EstadoEs
 **Endpoint**: `POST /api/logistica/muestras/{muestra_id}/recepcion-lab-central`
 **Payload**:
 ```json
-{
-  "mililitros": 2.50
-}
+{}
 ```
 **Success response** (`200 OK`):
 ```json
@@ -239,17 +240,17 @@ Estudio de Pompe urgente y demás Estudios del mismo SampleSet parcial (EstadoEs
   "estudios_en_espera_retiro_ids": [43, 44, 45, 46, 47, 48]
 }
 ```
-**Failure response** (`400` / `409`):
+**Failure response** (`409 Conflict`):
 ```json
 {
   "ok": false,
-  "error": "La muestra presenta volumen insuficiente (< 2 ml) y requiere remuestreo.",
-  "code": "VOLUMEN_INSUFICIENTE_REMUESTREO",
+  "error": "La muestra ya fue descartada previamente o su estudio no está en laboratorio central.",
+  "code": "MUESTRA_NO_APTA_PARA_SAMPLE_SET",
   "retryable": false
 }
 ```
 **Timeout**: 15s
-**ON FAILURE**: Si el volumen es `< 2 ml`, transicionar a `Remuestreo requerido`; si falla base de datos, rollback.
+**ON FAILURE**: Rollback transaccional sin alterar `SampleSet` ni `Estudio`. *(Si la muestra llegara luego a Corea con baja calidad, el remuestreo se gestiona en el Escenario 10).*
 
 *(Los contratos de `API del Ministerio de Salud` y `FedEx` son idénticos a los definidos en el Escenario 13, operando aquí con `cantidad_pacientes_autorizados` entre `1` y `10`).*
 
@@ -271,6 +272,7 @@ Estudio de Pompe urgente y demás Estudios del mismo SampleSet parcial (EstadoEs
 |---|---|---|---|---|
 | RC-1 | Tanto `Estudio` (`estudios.py#L31`) como `SampleSet` (`logistica.py#L30`) poseen el campo booleano `es_pompe_urgente: Mapped[bool] = mapped_column(Boolean, default=False)`. | Low | Todos los pasos | Alineado 100%: `Estudio.es_pompe_urgente` identifica el estudio urgente (y ordena la bandeja del bioinformático), mientras que `SampleSet.es_pompe_urgente` documenta por qué ese `SampleSet` se cerró con menos de 10 muestras. |
 | RC-2 | En `.ai/1-Entrevista.md` (líneas 442-445 y 475-476), el cliente especifica que si había 5 muestras en el lote abierto y entra el `Pompe urgente`, se envían las 6 juntas cerrando ese lote, y si luego llega una séptima muestra mientras el lote espera a `FedEx`, no se puede abrir la bolsa sellada sino que va a un nuevo lote. | High | STEP 2 & STEP 4 | Reflejado exactamente en STEP 2 y STEP 4. |
+| RC-3 | **[BRECHA DETECTADA]** En código actual (`reglas.py`, `logistica_service.py`), todavía existe la validación obsoleta `< 2 ml` (`ML_MINIMOS_TUBO` / `VOLUMEN_INSUFICIENTE`) y aún falta invocar `AuditoriaService` en el cierre del `SampleSet` urgente y en el cambio de estado de los `Estudio`s. | High | Prerequisites, STEP 1–5 | Retirar validación `< 2 ml` y conectar `AuditoriaService` según ADR-003 y ADR-004. |
 
 ---
 
@@ -303,3 +305,4 @@ Estudio de Pompe urgente y demás Estudios del mismo SampleSet parcial (EstadoEs
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/estudios.py`, `logistica.py`, `perfiles.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Adaptación v1.1 por Requerimientos 5 y 6 (ADR-003 y ADR-004): eliminada por completo la restricción `< 2 ml` (`ML_MINIMOS_TUBO` / `VOLUMEN_INSUFICIENTE`), agregada auditoría en `registro_modificaciones` sobre `SampleSet` y `Estudio`, y documentada brecha RC-3. | Especificación actualizada. |

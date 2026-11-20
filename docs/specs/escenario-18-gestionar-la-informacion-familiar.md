@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 18 – Gestionar la información familiar
-**Versión**: 1.0
-**Fecha**: 2026-10-28
+**Versión**: 1.1
+**Fecha**: 2026-11-17
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-18-Gestionar-la-informacion-familiar`
@@ -11,14 +11,18 @@
 |---|---|---|
 | **Sujeto** | `Médico` | `Medico` en `medicos` / `Usuario` (`Rol.MEDICO`, `Rol.GERENTE_MEDICO`) |
 | **Sujeto** | `Paciente` | `Paciente` en `pacientes` |
-| **Objeto** | `Familiar` | `Familiar` en `familiares` (`parentesco`, `nombre`, `diagnostico_previo`) |
+| **Objeto** | `Familiar` | `Familiar` en `familiares` (`parentesco`, `nombre`, `apellido`, `dni`, `paciente_vinculado_id`, `diagnostico_previo`) |
 | **Objeto** | `Síntoma` | `Sintoma` en `sintomas` y `FamiliarSintoma` en `familiares_sintomas` |
 | **Objeto** | `SNOMED` | `Sintoma.snomed_id` (`sintomas`) |
 | **Objeto** | `Patología` | `Patologia` en `patologias` (referenciada en `diagnostico_previo` cuando existe) |
-| **Objeto** | `Familiograma` | Archivo PDF referenciado en `Paciente.familiograma_pdf_path` |
+| **Objeto** | `Familiograma` | Archivo SVG/PDF referenciado en `Paciente.familiograma_pdf_path` |
 | **Objeto** | `API de familiograma` | Cliente HTTP en `app/src/clients/` |
+| **Objeto** | `Vínculo de estudios familiares` | `EstudioFamiliarVinculado` en `estudios_familiares_vinculados` |
+| **Objeto** | `Registro de modificaciones` | `RegistroModificacion` en `registro_modificaciones` (`entidad_tipo = 'paciente'`) |
 | **Verbo** | `Dar de alta paciente` | Flujo de alta/actualización clínica del `Paciente` |
 | **Verbo** | `Cargar síntomas` | Selección de síntomas codificados en `SNOMED` para los familiares |
+| **Verbo** | `Vincular estudios familiares` | Enlace automático cuando el familiar coincide con un paciente con estudios |
+| **Verbo** | `Registrar modificación` | Auditoría de cambios sobre `Paciente` y sus familiares |
 | **Estado** | *(N/A – Entidad Paciente)* | Aplica sobre `Paciente` (`pacientes`) durante la consulta médica |
 
 ---
@@ -115,8 +119,9 @@ El `Médico` tratante envía la nómina de familiares del paciente mediante `PUT
 **Actor**: `service` -> `repo` (`FamiliarRepo`) -> `PostgreSQL`
 **Action**:
 1. Si el `Paciente` tenía registros previos en `familiares` que están siendo actualizados por el `Médico`, los reemplaza limpiamente (`cascade="all, delete-orphan"` en `Paciente.familiares`, `perfiles.py#L80`).
-2. Por cada familiar recibido, inserta una fila en la tabla `familiares` (`paciente_id`, `parentesco`, `nombre`, `diagnostico_previo`).
+2. Por cada familiar recibido, inserta una fila en la tabla `familiares` (`paciente_id`, `parentesco`, `nombre`, `apellido`, `dni`, `paciente_vinculado_id`, `diagnostico_previo`). Si `dni` coincide con un `Paciente` ya existente, asigna `paciente_vinculado_id` automáticamente y vincula sus estudios en `estudios_familiares_vinculados` (Escenario 41).
 3. Por cada síntoma de cada familiar, inserta la fila asociativa en la tabla `familiares_sintomas` (`familiar_id`, `sintoma_id`).
+4. Registra la modificación en `registro_modificaciones` (`entidad_tipo = 'paciente'`, `entidad_id = paciente.id`, `accion = 'modificacion'`, `usuario_id = usuario_actual.id`, `cambios = {"familiares": {"anterior": prev, "nuevo": curr}}`).
 **Timeout**: 4s
 **Input**: `{ paciente_id: 15, familiares_validados }`
 **Output on SUCCESS**: `{ familiares_ids: [81, 82] }` -> GO TO STEP 3
@@ -369,3 +374,4 @@ Paciente (pacientes.familiograma_pdf_path y relación familiares):
 | Date | Finding | Action taken |
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/clinica.py`, `perfiles.py` y `enums.py`. | Estado marcado como `Approved`. |
+| 2026-11-17 | Actualizada por Req. 4 (`apellido`, `dni`, `paciente_vinculado_id` y enlace en `estudios_familiares_vinculados`) y Req. 6 (`registro_modificaciones` en `Paciente`). | Actualizada a v1.1. |
