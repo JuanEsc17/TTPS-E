@@ -260,6 +260,11 @@ export default function EstudiosResultadosPage({ sesion }) {
                                                         {badgeDiag.texto}
                                                     </span>
                                                 )}
+                                                {est.cantidad_analisis > 1 && (
+                                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[11px] font-semibold text-indigo-700">
+                                                        {est.cantidad_analisis} análisis
+                                                    </span>
+                                                )}
                                             </div>
 
                                             <p className="text-xs font-medium text-slate-700">
@@ -296,6 +301,14 @@ export default function EstudiosResultadosPage({ sesion }) {
                                                     >
                                                         Ver resultado
                                                     </Link>
+                                                    {esMedico && est.tiene_datos_crudos && (
+                                                        <Link
+                                                            to={`/estudios/${est.estudio_id}/resultado?reanalizar=1`}
+                                                            className="rounded-xl border border-cyan-600/40 bg-cyan-50/70 px-3.5 py-2 text-xs font-semibold text-[#0B4F8A] transition hover:bg-cyan-100/70 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-1"
+                                                        >
+                                                            Reanalizar
+                                                        </Link>
+                                                    )}
                                                     <button
                                                         type="button"
                                                         disabled={descargandoId === est.estudio_id}
@@ -309,6 +322,13 @@ export default function EstudiosResultadosPage({ sesion }) {
                                                             : "Descargar PDF"}
                                                     </button>
                                                 </>
+                                            ) : est.cantidad_analisis > 1 ? (
+                                                <Link
+                                                    to={`/estudios/${est.estudio_id}/resultado`}
+                                                    className="rounded-xl border border-[#0B4F8A] bg-white px-3.5 py-2 text-xs font-semibold text-[#0B4F8A] transition hover:bg-[#EAF2FA] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-1"
+                                                >
+                                                    Ver historial
+                                                </Link>
                                             ) : (
                                                 <span className="text-xs font-medium text-slate-400">
                                                     Resultado aún no disponible

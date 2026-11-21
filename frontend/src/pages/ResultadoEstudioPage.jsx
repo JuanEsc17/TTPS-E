@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
     descargarResultadoPdfRequest,
+    obtenerHistorialAnalisisRequest,
     obtenerResultadoEstudioRequest,
 } from "../api/resultados";
+import ModalReanalisis from "../components/ModalReanalisis";
 
 const ESTILO_DIAGNOSTICO = {
     positivo: {
@@ -84,14 +86,17 @@ function rutaVolverPorRol(rol) {
 
 export default function ResultadoEstudioPage({ sesion }) {
     const { estudioId } = useParams();
+    const [searchParams, setSearchParams] = useSearchParams();
     const token = sesion?.access_token;
     const rol = sesion?.usuario?.rol;
+    const esMedico = rol === "medico" || rol === "gerente_medico";
 
     const [recargaId, setRecargaId] = useState(0);
     const claveActual = `${token || ""}:${estudioId}:${recargaId}`;
     const [estadoCarga, setEstadoCarga] = useState({
         clave: null,
         datos: null,
+        historialApi: null,
         error: null,
     });
     const [analisisSeleccionadoId, setAnalisisSeleccionadoId] = useState(null);
@@ -99,51 +104,115 @@ export default function ResultadoEstudioPage({ sesion }) {
     const [ultimaDescargaAnalisisId, setUltimaDescargaAnalisisId] = useState(null);
     const [errorDescarga, setErrorDescarga] = useState("");
     const [avisoDescargaOk, setAvisoDescargaOk] = useState("");
+    const [modalReanalisisAbierto, setModalReanalisisAbierto] = useState(
+        () => searchParams.get("reanalizar") === "1"
+    );
+    const [avisoReanalisisOk, setAvisoReanalisisOk] = useState("");
 
     useEffect(() => {
         if (!token || !estudioId) return;
         const controller = new AbortController();
 
-        obtenerResultadoEstudioRequest({
-            token,
-            estudioId,
-            signal: controller.signal,
-        })
-            .then((datos) => {
-                if (controller.signal.aborted) return;
-                setEstadoCarga({ clave: claveActual, datos, error: null });
+        Promise.allSettled([
+            obtenerResultadoEstudioRequest({ token, estudioId, signal: controller.signal }),
+            obtenerHistorialAnalisisRequest({ token, estudioId, signal: controller.signal }),
+        ]).then(([resResultado, resHistorial]) => {
+            if (controller.signal.aborted) return;
+
+            const datosRes = resResultado.status === "fulfilled" ? resResultado.value : null;
+            const datosHist = resHistorial.status === "fulfilled" ? resHistorial.value : null;
+
+            if (datosRes) {
+                setEstadoCarga({
+                    clave: claveActual,
+                    datos: datosRes,
+                    historialApi: datosHist,
+                    error: null,
+                });
                 setAnalisisSeleccionadoId(null);
                 // El backend marca los avisos de este estudio como leidos; refrescamos la campana
                 window.dispatchEvent(new Event("avisos:actualizar"));
-            })
-            .catch((err) => {
-                if (err?.name === "AbortError" || controller.signal.aborted) return;
+                return;
+            }
+
+            // Si hay un reanalisis en curso (/resultado -> 409) pero existe historial previo, mostramos la vista de reanalisis en curso
+            if (
+                datosHist &&
+                Array.isArray(datosHist.historial_analisis) &&
+                datosHist.historial_analisis.some((a) => a.resultado !== null)
+            ) {
                 setEstadoCarga({
                     clave: claveActual,
                     datos: null,
-                    error: {
-                        mensaje: err.message,
-                        code: err.code,
-                        status: err.status,
-                        retryable: Boolean(err.retryable),
-                    },
+                    historialApi: datosHist,
+                    error: null,
                 });
+                return;
+            }
+
+            const err =
+                resResultado.status === "rejected"
+                    ? resResultado.reason
+                    : resHistorial.status === "rejected"
+                        ? resHistorial.reason
+                        : new Error("No se pudo cargar el resultado.");
+            if (err?.name === "AbortError") return;
+            setEstadoCarga({
+                clave: claveActual,
+                datos: null,
+                historialApi: null,
+                error: {
+                    mensaje: err.message,
+                    code: err.code,
+                    status: err.status,
+                    retryable: Boolean(err.retryable),
+                },
             });
+        });
 
         return () => controller.abort();
     }, [token, estudioId, claveActual]);
 
     const cargando = Boolean(token && estudioId) && estadoCarga.clave !== claveActual;
     const datos = estadoCarga.clave === claveActual ? estadoCarga.datos : null;
+    const historialApi = estadoCarga.clave === claveActual ? estadoCarga.historialApi : null;
     const error = estadoCarga.clave === claveActual ? estadoCarga.error : null;
 
     const historial = datos?.historial_resultados || [];
+    const historialAnalisis = historialApi?.historial_analisis || [];
+    const enReanalisisCurso = !datos && Boolean(historialApi) && historialAnalisis.length > 0;
+    const puedeReanalizar = Boolean(esMedico && historialApi?.puede_solicitar_reanalisis);
     const resultadoVisible =
         (analisisSeleccionadoId
             ? historial.find((h) => h.analisis_id === analisisSeleccionadoId)
             : null) || datos?.resultado_actual;
 
     const destinoVolver = rutaVolverPorRol(rol);
+
+    function abrirModalReanalisis() {
+        setAvisoReanalisisOk("");
+        setModalReanalisisAbierto(true);
+    }
+
+    function cerrarModalReanalisis() {
+        setModalReanalisisAbierto(false);
+        if (searchParams.has("reanalizar")) {
+            const next = new URLSearchParams(searchParams);
+            next.delete("reanalizar");
+            setSearchParams(next, { replace: true });
+        }
+    }
+
+    function handleReanalisisCreado(resp) {
+        cerrarModalReanalisis();
+        const simbolos = (resp.nuevos_genes || []).map((g) => g.simbolo).join(", ");
+        setAvisoReanalisisOk(
+            `Reanálisis #${resp.analisis_id} enviado a bioinformática sobre ${simbolos}. ` +
+            "El estudio pasó a 'En análisis por bioinformática' sin requerir nueva muestra."
+        );
+        window.dispatchEvent(new Event("avisos:actualizar"));
+        setRecargaId((n) => n + 1);
+    }
 
     async function handleDescargarPdf(analisisIdOpcional = null) {
         if (!token || !estudioId) return;
@@ -183,48 +252,94 @@ export default function ResultadoEstudioPage({ sesion }) {
                     </Link>
                     <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-[#0B4F8A]">
                         Informe genómico · Estudio #{estudioId}
-                        {datos?.patologia_sospechada?.nombre && (
-                            <span> · {datos.patologia_sospechada.nombre}</span>
+                        {(datos?.patologia_sospechada?.nombre ||
+                            historialApi?.patologia_sospechada?.nombre) && (
+                            <span>
+                                {" "}·{" "}
+                                {datos?.patologia_sospechada?.nombre ||
+                                    historialApi?.patologia_sospechada?.nombre}
+                            </span>
                         )}
                     </p>
                     <h1 className="font-titulo mt-0.5 text-2xl font-semibold text-slate-900 sm:text-3xl">
-                        Resultado del estudio de exoma
+                        {enReanalisisCurso
+                            ? "Historial de análisis y reanálisis en curso"
+                            : "Resultado del estudio de exoma"}
                     </h1>
                 </div>
 
                 {datos && resultadoVisible && (
-                    <button
-                        type="button"
-                        onClick={() =>
-                            handleDescargarPdf(
-                                analisisSeleccionadoId &&
-                                    analisisSeleccionadoId !== datos.resultado_actual?.analisis_id
-                                    ? analisisSeleccionadoId
-                                    : null
-                            )
-                        }
-                        disabled={descargandoAnalisisId !== null}
-                        aria-busy={descargandoAnalisisId !== null}
-                        className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#0B4F8A] to-[#0E7490] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-[#093E6D] hover:to-[#0B5E75] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-2 disabled:opacity-50"
-                    >
-                        <svg
-                            viewBox="0 0 24 24"
-                            className="h-4 w-4 shrink-0"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            aria-hidden="true"
+                    <div className="flex flex-wrap items-center gap-2.5">
+                        {puedeReanalizar && (
+                            <button
+                                type="button"
+                                onClick={abrirModalReanalisis}
+                                className="inline-flex items-center gap-2 rounded-xl border border-[#0B4F8A] bg-white px-4 py-2.5 text-sm font-semibold text-[#0B4F8A] shadow-xs transition hover:bg-[#EAF2FA] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-2"
+                            >
+                                <svg
+                                    viewBox="0 0 24 24"
+                                    className="h-4 w-4 shrink-0"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="2"
+                                    aria-hidden="true"
+                                >
+                                    <polyline points="23 4 23 10 17 10" />
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                </svg>
+                                Solicitar reanálisis
+                            </button>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() =>
+                                handleDescargarPdf(
+                                    analisisSeleccionadoId &&
+                                        analisisSeleccionadoId !== datos.resultado_actual?.analisis_id
+                                        ? analisisSeleccionadoId
+                                        : null
+                                )
+                            }
+                            disabled={descargandoAnalisisId !== null}
+                            aria-busy={descargandoAnalisisId !== null}
+                            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-[#0B4F8A] to-[#0E7490] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:from-[#093E6D] hover:to-[#0B5E75] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-2 disabled:opacity-50"
                         >
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                            <polyline points="7 10 12 15 17 10" />
-                            <line x1="12" y1="15" x2="12" y2="3" />
-                        </svg>
-                        {descargandoAnalisisId !== null
-                            ? "Descargando PDF..."
-                            : "Descargar resultado en PDF"}
-                    </button>
+                            <svg
+                                viewBox="0 0 24 24"
+                                className="h-4 w-4 shrink-0"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                                aria-hidden="true"
+                            >
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                            {descargandoAnalisisId !== null
+                                ? "Descargando PDF..."
+                                : "Descargar resultado en PDF"}
+                        </button>
+                    </div>
                 )}
             </div>
+
+            {avisoReanalisisOk && (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-900"
+                >
+                    <span>{avisoReanalisisOk}</span>
+                    <button
+                        type="button"
+                        onClick={() => setAvisoReanalisisOk("")}
+                        className="font-semibold underline"
+                    >
+                        Cerrar
+                    </button>
+                </div>
+            )}
 
             {avisoDescargaOk && (
                 <div
@@ -319,6 +434,111 @@ export default function ResultadoEstudioPage({ sesion }) {
                         )}
                     </div>
                 </section>
+            ) : enReanalisisCurso ? (
+                <div className="space-y-6">
+                    <section
+                        aria-label="Reanálisis en curso"
+                        className="rounded-2xl border border-cyan-200 bg-cyan-50/85 p-5 text-slate-900 shadow-xs"
+                    >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#0B4F8A]">
+                                    Reanálisis en curso · Exoma reutilizado
+                                </p>
+                                <h2 className="mt-0.5 text-lg font-bold text-slate-900">
+                                    El equipo de bioinformática está evaluando los nuevos genes
+                                </h2>
+                                <p className="mt-1 text-xs text-slate-700">
+                                    Se utilizan los datos crudos ya secuenciados sin nueva muestra. Mientras finaliza el reanálisis, el historial de resultados anteriores sigue disponible para consulta y descarga.
+                                </p>
+                            </div>
+                            <span className="rounded-full border border-cyan-300 bg-white px-3 py-1 text-xs font-semibold text-[#0B4F8A]">
+                                {historialApi.estado_estudio}
+                            </span>
+                        </div>
+                    </section>
+
+                    <section
+                        aria-label="Historial de análisis del estudio"
+                        className="tarjeta-cristal"
+                    >
+                        <div className="h-1.5 w-full bg-gradient-to-r from-[#062846] via-[#0B4F8A] to-[#0891B2]" />
+                        <div className="p-6">
+                            <h2 className="text-base font-semibold text-slate-900">
+                                Historial de análisis ({historialAnalisis.length})
+                            </h2>
+                            <ul className="mt-4 space-y-3">
+                                {historialAnalisis.map((item) => {
+                                    const res = item.resultado;
+                                    const estDiag = res
+                                        ? ESTILO_DIAGNOSTICO[res.diagnostico] ||
+                                          ESTILO_DIAGNOSTICO.negativo
+                                        : null;
+                                    return (
+                                        <li
+                                            key={item.analisis_id}
+                                            className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 text-xs"
+                                        >
+                                            <div className="space-y-1.5">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <span className="font-semibold text-slate-900">
+                                                        Análisis #{item.analisis_id} (
+                                                        {item.tipo === "reanalisis"
+                                                            ? "Reanálisis"
+                                                            : "Inicial"}
+                                                        )
+                                                    </span>
+                                                    {res ? (
+                                                        <span
+                                                            className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${estDiag.badge}`}
+                                                        >
+                                                            {res.diagnostico.toUpperCase()}
+                                                        </span>
+                                                    ) : (
+                                                        <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-0.5 text-[10px] font-semibold text-[#0B4F8A]">
+                                                            En análisis
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="flex flex-wrap items-center gap-1.5">
+                                                    <span className="text-[11px] text-slate-500">Genes:</span>
+                                                    {(item.genes || []).map((sim) => (
+                                                        <span
+                                                            key={sim}
+                                                            className="rounded-md bg-[#EAF2FA] px-2 py-0.5 font-mono text-[11px] font-semibold text-[#0B4F8A]"
+                                                        >
+                                                            {sim}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                                <p className="text-[11px] text-slate-500">
+                                                    Solicitado: {formatearFechaHora(item.created_at)}
+                                                    {res?.generado_en && (
+                                                        <span>
+                                                            {" "}· Emitido: {formatearFechaHora(res.generado_en)}
+                                                        </span>
+                                                    )}
+                                                </p>
+                                            </div>
+                                            {res && (
+                                                <button
+                                                    type="button"
+                                                    disabled={descargandoAnalisisId !== null}
+                                                    onClick={() => handleDescargarPdf(item.analisis_id)}
+                                                    className="rounded-xl border border-[#0B4F8A] bg-white px-3.5 py-2 font-semibold text-[#0B4F8A] transition hover:bg-[#EAF2FA] disabled:opacity-50"
+                                                >
+                                                    {descargandoAnalisisId === item.analisis_id
+                                                        ? "Descargando..."
+                                                        : "Descargar PDF"}
+                                                </button>
+                                            )}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </div>
+                    </section>
+                </div>
             ) : datos && resultadoVisible ? (
                 <div className="space-y-6">
                     {/* Tarjeta principal de conclusion diagnostica */}
@@ -587,6 +807,21 @@ export default function ResultadoEstudioPage({ sesion }) {
                     )}
                 </div>
             ) : null}
+
+            {modalReanalisisAbierto && puedeReanalizar && (
+                <ModalReanalisis
+                    token={token}
+                    estudioId={Number(estudioId)}
+                    patologiaActualId={
+                        datos?.patologia_sospechada?.id ||
+                        historialApi?.patologia_sospechada?.id ||
+                        null
+                    }
+                    genesYaAnalizados={historialApi?.genes_ya_analizados || []}
+                    onCerrar={cerrarModalReanalisis}
+                    onCreado={handleReanalisisCreado}
+                />
+            )}
         </div>
     );
 }

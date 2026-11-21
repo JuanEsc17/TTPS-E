@@ -25,6 +25,7 @@ from src.core.models import (
     EstudioGen,
     Gen,
     Medico,
+    OrigenGen,
     Paciente,
     Resultado,
     TipoAnalisis,
@@ -152,6 +153,42 @@ def copiar_genes_a_analisis(analisis_id: int, genes_ids: list[int]) -> None:
     """Asocia genes a un analisis existente sin duplicar claves."""
     for gen_id in dict.fromkeys(genes_ids):
         db.session.add(AnalisisGen(analisis_id=analisis_id, gen_id=gen_id))
+    db.session.flush()
+
+
+def crear_analisis_reanalisis(
+    *,
+    estudio_id: int,
+    solicitado_por_id: int,
+    genes_ids: list[int],
+) -> Analisis:
+    """Crea una nueva fila Analisis(REANALISIS) y asocia los nuevos genes sin tocar el historial."""
+    analisis = Analisis(
+        estudio_id=estudio_id,
+        tipo=TipoAnalisis.REANALISIS,
+        bioinformatico_id=None,
+        solicitado_por_id=solicitado_por_id,
+    )
+    db.session.add(analisis)
+    db.session.flush()
+
+    for gen_id in dict.fromkeys(genes_ids):
+        db.session.add(AnalisisGen(analisis_id=analisis.id, gen_id=gen_id))
+    db.session.flush()
+    return analisis
+
+
+def agregar_genes_estudio(
+    estudio: Estudio,
+    genes_con_origen: list[tuple[int, OrigenGen]],
+) -> None:
+    """Agrega en estudios_genes aquellos genes que aun no estaban asociados al estudio."""
+    existentes = {eg.gen_id for eg in estudio.genes}
+    for gen_id, origen in genes_con_origen:
+        if gen_id in existentes:
+            continue
+        existentes.add(gen_id)
+        db.session.add(EstudioGen(estudio_id=estudio.id, gen_id=gen_id, origen=origen))
     db.session.flush()
 
 

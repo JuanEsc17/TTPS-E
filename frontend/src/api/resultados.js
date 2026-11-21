@@ -1,6 +1,9 @@
 const TIMEOUT_MS = 10000;
 
-async function fetchConTimeout(url, { token, signal, timeoutMs = TIMEOUT_MS } = {}) {
+async function fetchConTimeout(
+    url,
+    { token, method = "GET", body, signal, timeoutMs = TIMEOUT_MS } = {}
+) {
     const controller = new AbortController();
     let porTimeout = false;
     const onExternalAbort = () => controller.abort();
@@ -16,10 +19,16 @@ async function fetchConTimeout(url, { token, signal, timeoutMs = TIMEOUT_MS } = 
         controller.abort();
     }, timeoutMs);
 
+    const headers = { Authorization: `Bearer ${token}` };
+    if (body !== undefined) {
+        headers["Content-Type"] = "application/json";
+    }
+
     try {
         return await fetch(url, {
-            method: "GET",
-            headers: { Authorization: `Bearer ${token}` },
+            method,
+            headers,
+            body: body !== undefined ? JSON.stringify(body) : undefined,
             signal: controller.signal,
         });
     } catch (err) {
@@ -144,4 +153,68 @@ export async function descargarResultadoPdfRequest({ token, estudioId, analisisI
     enlace.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     return nombreArchivo;
+}
+
+export async function obtenerHistorialAnalisisRequest({ token, estudioId, signal }) {
+    const resp = await fetchConTimeout(`/api/estudios/${estudioId}/analisis`, { token, signal });
+    if (!resp.ok) {
+        throw await parsearError(resp, "No se pudo consultar el historial de análisis del estudio.");
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!data.ok) {
+        const err = new Error(
+            data.error || "No se pudo consultar el historial de análisis del estudio."
+        );
+        err.code = data.code;
+        err.status = resp.status;
+        err.retryable = Boolean(data.retryable);
+        throw err;
+    }
+    return data;
+}
+
+export async function solicitarReanalisisRequest({
+    token,
+    estudioId,
+    nuevosGenesSimbolos,
+    nuevaPatologiaSospechadaId = null,
+}) {
+    const payload = {
+        nuevos_genes_simbolos: nuevosGenesSimbolos,
+    };
+    if (nuevaPatologiaSospechadaId) {
+        payload.nueva_patologia_sospechada_id = Number(nuevaPatologiaSospechadaId);
+    }
+
+    const resp = await fetchConTimeout(`/api/estudios/${estudioId}/reanalisis`, {
+        token,
+        method: "POST",
+        body: payload,
+    });
+    if (!resp.ok) {
+        throw await parsearError(resp, "No se pudo solicitar el reanálisis del estudio.");
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!data.ok) {
+        const err = new Error(data.error || "No se pudo solicitar el reanálisis del estudio.");
+        err.code = data.code;
+        err.status = resp.status;
+        err.retryable = Boolean(data.retryable);
+        throw err;
+    }
+    return data;
+}
+
+export async function buscarGenesCatalogoRequest({ token, q = "", limite = 20, signal }) {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set("q", q.trim());
+    if (limite) params.set("limite", String(limite));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+
+    const resp = await fetchConTimeout(`/api/genes${qs}`, { token, signal });
+    if (!resp.ok) {
+        throw await parsearError(resp, "No se pudo consultar el catálogo de genes.");
+    }
+    const data = await resp.json().catch(() => ({}));
+    return Array.isArray(data.genes) ? data.genes : [];
 }

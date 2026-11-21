@@ -48,7 +48,7 @@ body:
       label: Solución propuesta
       description: Detallá el comportamiento esperado, endpoints o componentes a crear y cambios técnicos sugeridos.
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: criterios

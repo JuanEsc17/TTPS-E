@@ -1,4 +1,4 @@
-"""Servicio de logica de negocio para analisis bioinformatico (Escenarios 15 y 24)."""
+"""Servicio de logica de negocio para analisis bioinformatico y reanalisis (Escenarios 15, 17 y 24)."""
 from __future__ import annotations
 
 import logging
@@ -26,11 +26,14 @@ from src.core.models import (
     EstadoEstudio,
     Estudio,
     Gen,
+    OrigenGen,
     Rol,
     TipoAccionAuditoria,
+    TipoAnalisis,
+    Usuario,
     Variante,
 )
-from src.core.repos import bioinformatica_repo, usuario_repo
+from src.core.repos import bioinformatica_repo, clinica_repo, usuario_repo
 from src.core.services import auditoria_service, resultado_service
 from src.core.services.excepciones import ErrorDominio
 
@@ -39,6 +42,7 @@ _EMAIL_CLIENT_ORIGINAL = EmailClient
 
 MAX_BYTES_DATOS_CRUDOS = 5 * 1024 * 1024  # 5 MB
 _BACKOFFS_BIOINFORMATICA = (0.5, 1.0)
+_PATRON_SIMBOLO_GEN = re.compile(r"^[A-Z0-9][A-Z0-9._-]{0,29}$")
 
 _MAPA_CLASIFICACION: dict[str, ClasificacionVariante] = {
     "patogenica": ClasificacionVariante.PATOGENICA,
@@ -511,8 +515,10 @@ def tomar_estudio(
             reintentable=True,
         ) from exc
 
+    evento_toma = "reanalisis_tomado" if activo.tipo == TipoAnalisis.REANALISIS else "estudio_tomado"
     logger.info(
-        "[bioinformatica_service] estudio_tomado estudio_id=%s analisis_id=%s bioinformatico_id=%s",
+        "[bioinformatica_service] %s estudio_id=%s analisis_id=%s bioinformatico_id=%s",
+        evento_toma,
         estudio.id,
         activo.id,
         usuario_id,
@@ -960,17 +966,26 @@ def registrar_variantes_analisis(
         cliente_cls=EmailClient,
     )
 
-    logger.info(
-        '[bioinformatica_service] variantes_registradas estudio_id=%s analisis_id=%s variantes=%s estado="%s"',
-        estudio.id,
-        activo.id,
-        ids_unicos,
-        estudio.estado.value,
-    )
+    if activo.tipo == TipoAnalisis.REANALISIS:
+        logger.info(
+            "[bioinformatica_service] reanalisis_completado estudio_id=%s analisis_id=%s resultado_id=%s",
+            estudio.id,
+            activo.id,
+            resultado.id,
+        )
+    else:
+        logger.info(
+            '[bioinformatica_service] variantes_registradas estudio_id=%s analisis_id=%s variantes=%s estado="%s"',
+            estudio.id,
+            activo.id,
+            ids_unicos,
+            estudio.estado.value,
+        )
     return {
         "estudio_id": estudio.id,
         "analisis_id": activo.id,
         "tipo_analisis": activo.tipo.value,
+        "total_analisis_en_historial": len(estudio.analisis),
         "variantes_registradas": [
             {
                 "id": v.id,
@@ -994,3 +1009,428 @@ def registrar_variantes_analisis(
         },
         "estado_estudio": estudio.estado.value,
     }
+
+
+def _validar_simbolo_gen_en_apigen(simbolo: str, cliente: Any) -> dict[str, Any] | None:
+    """Consulta Apigen por prefijo y verifica coincidencia exacta del simbolo de gen."""
+    try:
+        items = cliente.buscar_genes(simbolo, limite=20)
+    except (ClienteConexionError, ClienteServicioError) as exc:
+        logger.warning("[bioinformatica_client] fallo transitorio buscar_genes simbolo=%s err=%s", simbolo, exc)
+        raise ErrorDominio(
+            "No se pudo validar los genes contra la API de bioinformatica. Intente nuevamente.",
+            codigo="API_BIOINFORMATICA_NO_DISPONIBLE",
+            http_status=503,
+            reintentable=True,
+        ) from exc
+    except (ClienteError, httpx.HTTPStatusError, ValueError) as exc:
+        logger.warning("[bioinformatica_client] error buscar_genes simbolo=%s err=%s", simbolo, exc)
+        raise ErrorDominio(
+            "Error al validar los genes contra la API de bioinformatica.",
+            codigo="BIOINFORMATICS_API_ERROR",
+            http_status=502,
+        ) from exc
+
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and str(item.get("simbolo", "")).strip().upper() == simbolo:
+            return item
+        if isinstance(item, str) and item.strip().upper() == simbolo:
+            return {"simbolo": simbolo}
+    return None
+
+
+def _notificar_bioinformaticos_reanalisis(
+    *,
+    estudio: Estudio,
+    analisis_id: int,
+    simbolos_nuevos: list[str],
+    avisos_mail: list[Aviso],
+    destinatarios: list[str],
+    aviso_msg: str,
+    email_client: EmailClient | None,
+) -> None:
+    mail_equipo = os.environ.get("BIOINFORMATICA_EQUIPO_EMAIL", "").strip()
+    if mail_equipo and mail_equipo not in destinatarios:
+        destinatarios.append(mail_equipo)
+
+    cliente_email = resultado_service.resolver_email_client(email_client, cliente_cls=EmailClient)
+    if destinatarios and cliente_email is not None:
+        enviado = resultado_service.enviar_email_resiliente(
+            cliente_email,
+            asunto=f"Reanalisis disponible - Estudio #{estudio.id} ({', '.join(simbolos_nuevos)})",
+            mensaje=aviso_msg,
+            destinatarios=destinatarios,
+            referencia=f"REANALISIS-{estudio.id}-{analisis_id}",
+            idempotency_key=f"reanalisis-{estudio.id}-{analisis_id}",
+        )
+        if enviado and avisos_mail:
+            try:
+                bioinformatica_repo.marcar_avisos_enviados(avisos_mail, resultado_service.ahora_utc_naive())
+                bioinformatica_repo.guardar_cambios()
+            except SQLAlchemyError as exc:
+                bioinformatica_repo.deshacer_cambios()
+                logger.warning(
+                    "[bioinformatica_service] error_marcar_avisos_reanalisis estudio_id=%s analisis_id=%s err=%s",
+                    estudio.id,
+                    analisis_id,
+                    exc,
+                )
+
+
+def solicitar_reanalisis_estudio(
+    *,
+    estudio_id: int,
+    usuario: Usuario,
+    nuevos_genes_simbolos: list[str] | None = None,
+    genes_ids: list[int] | None = None,
+    nueva_patologia_sospechada_id: int | None = None,
+    bioinformatica_client: Any | None = None,
+    email_client: EmailClient | None = None,
+    ip_origen: str | None = None,
+) -> dict[str, Any]:
+    """Escenario 17 (STEP 1 y STEP 2): Valida y crea un Analisis(REANALISIS) sobre los DatosCrudos existentes."""
+    if usuario.rol not in (Rol.MEDICO, Rol.GERENTE_MEDICO):
+        raise ErrorDominio(
+            "Solo un medico puede solicitar el reanalisis de un estudio.",
+            codigo="SOLO_MEDICO",
+            http_status=403,
+        )
+
+    medico = bioinformatica_repo.buscar_medico_por_usuario_id(usuario.id)
+    if medico is None:
+        raise ErrorDominio(
+            "El usuario autenticado no posee perfil de medico activo.",
+            codigo="SOLO_MEDICO",
+            http_status=403,
+        )
+
+    estudio = bioinformatica_repo.buscar_estudio_por_id(estudio_id, bloquear=True)
+    if estudio is None:
+        raise ErrorDominio("Estudio no encontrado.", codigo="ESTUDIO_NO_ENCONTRADO", http_status=404)
+
+    es_medico_autorizado = estudio.medico_id == medico.id or any(
+        a.solicitado_por_id == medico.id for a in estudio.analisis
+    )
+    # shortcut: pacientes_medicos_autorizados (Escenario 40) aun no existe en models/; extender aqui al implementarlo
+    if not es_medico_autorizado:
+        logger.warning(
+            "[estudio_service] reanalisis_denegado estudio_id=%s usuario_id=%s medico_id=%s",
+            estudio.id,
+            usuario.id,
+            medico.id,
+        )
+        raise ErrorDominio(
+            "No tiene permisos para solicitar un reanalisis sobre este estudio.",
+            codigo="FORBIDDEN_REANALISIS_ESTUDIO",
+            http_status=403,
+        )
+
+    if (
+        estudio.estado != EstadoEstudio.RESULTADO_CARGADO
+        or estudio.datos_crudos is None
+        or _analisis_activo(estudio) is not None
+    ):
+        raise ErrorDominio(
+            "El estudio debe estar en estado 'Resultado cargado' y contar con datos crudos para solicitar un reanalisis.",
+            codigo="ESTUDIO_NO_APTO_PARA_REANALISIS",
+            http_status=409,
+        )
+
+    nueva_patologia = None
+    if nueva_patologia_sospechada_id is not None:
+        nueva_patologia = clinica_repo.buscar_patologia_por_id(nueva_patologia_sospechada_id)
+        if nueva_patologia is None:
+            raise ErrorDominio(
+                "La patologia sospechada indicada no existe.",
+                codigo="PATOLOGIA_NO_ENCONTRADA",
+                http_status=404,
+            )
+
+    simbolos_limpios: list[str] = []
+    for raw in nuevos_genes_simbolos or []:
+        simbolo = str(raw).strip().upper()
+        if not simbolo:
+            continue
+        if not _PATRON_SIMBOLO_GEN.match(simbolo):
+            raise ErrorDominio(
+                f"El simbolo de gen '{simbolo}' tiene un formato invalido.",
+                codigo="GEN_SIMBOLO_INVALIDO",
+                http_status=400,
+            )
+        if simbolo not in simbolos_limpios:
+            simbolos_limpios.append(simbolo)
+
+    ids_limpios = list(dict.fromkeys(genes_ids or []))
+
+    logger.info(
+        "[estudio_service] validando_reanalisis estudio_id=%s medico_id=%s nuevos_genes=%s",
+        estudio.id,
+        medico.id,
+        simbolos_limpios or ids_limpios,
+    )
+
+    genes_solicitados: list[Gen] = []
+    vistos_gen_ids: set[int] = set()
+
+    if ids_limpios:
+        encontrados_ids = {g.id: g for g in clinica_repo.buscar_genes_por_ids(ids_limpios)}
+        faltantes_ids = [gid for gid in ids_limpios if gid not in encontrados_ids]
+        if faltantes_ids:
+            raise ErrorDominio(
+                "Alguno de los genes seleccionados no existe en el catalogo.",
+                codigo="GEN_NO_ENCONTRADO",
+                http_status=400,
+            )
+        for gid in ids_limpios:
+            genes_solicitados.append(encontrados_ids[gid])
+            vistos_gen_ids.add(gid)
+
+    simbolos_para_crear: list[dict[str, Any]] = []
+    if simbolos_limpios:
+        encontrados_sim = {
+            g.simbolo.upper(): g for g in clinica_repo.buscar_genes_por_simbolos(simbolos_limpios)
+        }
+        faltantes_sim = [s for s in simbolos_limpios if s not in encontrados_sim]
+        if faltantes_sim:
+            cliente = _resolver_bioinformatica_client(bioinformatica_client)
+            for simbolo in faltantes_sim:
+                info = _validar_simbolo_gen_en_apigen(simbolo, cliente)
+                if info is None:
+                    raise ErrorDominio(
+                        f"El gen '{simbolo}' no fue encontrado en el catalogo de bioinformatica.",
+                        codigo="GEN_DESCONOCIDO",
+                        http_status=400,
+                    )
+                simbolos_para_crear.append(
+                    {
+                        "simbolo": simbolo,
+                        "nombre": info.get("nombre"),
+                        "es_hallazgo_secundario": bool(info.get("es_hallazgo_secundario", False)),
+                    }
+                )
+        for simbolo in simbolos_limpios:
+            gen_local = encontrados_sim.get(simbolo)
+            if gen_local is not None and gen_local.id not in vistos_gen_ids:
+                genes_solicitados.append(gen_local)
+                vistos_gen_ids.add(gen_local.id)
+
+    if not simbolos_limpios and not ids_limpios and nueva_patologia is not None:
+        for gen_pat in nueva_patologia.genes:
+            if gen_pat.id not in vistos_gen_ids:
+                genes_solicitados.append(gen_pat)
+                vistos_gen_ids.add(gen_pat.id)
+
+    if not genes_solicitados and not simbolos_para_crear:
+        raise ErrorDominio(
+            "Debe indicar al menos un gen nuevo para solicitar el reanalisis.",
+            codigo="GENES_YA_ANALIZADOS_O_VACIOS",
+            http_status=400,
+        )
+
+    genes_ya_analizados_ids = {ag.gen_id for a in estudio.analisis for ag in a.genes}
+    if not genes_ya_analizados_ids and estudio.analisis:
+        genes_ya_analizados_ids = {eg.gen_id for eg in estudio.genes}
+    simbolos_previos = sorted(
+        {ag.gen.simbolo for a in estudio.analisis for ag in a.genes if ag.gen is not None}
+    )
+
+    genes_existentes_nuevos = [g for g in genes_solicitados if g.id not in genes_ya_analizados_ids]
+    if not genes_existentes_nuevos and not simbolos_para_crear:
+        raise ErrorDominio(
+            "Todos los genes solicitados ya fueron analizados previamente en este estudio.",
+            codigo="GENES_YA_ANALIZADOS_O_VACIOS",
+            http_status=400,
+        )
+
+    patologia_objetivo = nueva_patologia or estudio.patologia_sospechada
+    patologia_genes_ids = (
+        {g.id for g in patologia_objetivo.genes} if patologia_objetivo is not None else set()
+    )
+    ahora = resultado_service.ahora_utc_naive()
+    bioinformaticos = usuario_repo.listar_por_rol(Rol.BIOINFORMATICO)
+    avisos_mail: list[Aviso] = []
+    destinatarios: list[str] = []
+
+    try:
+        genes_creados = [
+            clinica_repo.crear_gen(
+                simbolo=item["simbolo"],
+                nombre=item["nombre"],
+                es_hallazgo_secundario=item["es_hallazgo_secundario"],
+            )
+            for item in simbolos_para_crear
+        ]
+        nuevos_genes = [*genes_existentes_nuevos, *genes_creados]
+        nuevos_genes_ids = [g.id for g in nuevos_genes]
+        simbolos_nuevos = [g.simbolo for g in nuevos_genes]
+
+        nuevo_analisis = bioinformatica_repo.crear_analisis_reanalisis(
+            estudio_id=estudio.id,
+            solicitado_por_id=medico.id,
+            genes_ids=nuevos_genes_ids,
+        )
+
+        genes_con_origen = [
+            (
+                g.id,
+                OrigenGen.PATOLOGIA
+                if g.id in patologia_genes_ids
+                else (OrigenGen.HALLAZGO_SECUNDARIO if g.es_hallazgo_secundario else OrigenGen.MANUAL),
+            )
+            for g in nuevos_genes
+        ]
+        bioinformatica_repo.agregar_genes_estudio(estudio, genes_con_origen)
+
+        estado_anterior = estudio.estado.value
+        patologia_anterior_id = estudio.patologia_sospechada_id
+        if nueva_patologia is not None:
+            estudio.patologia_sospechada_id = nueva_patologia.id
+        estudio.estado = EstadoEstudio.EN_ANALISIS_BIOINFORMATICA
+
+        cambios_auditoria: dict[str, Any] = {
+            "estado": {
+                "anterior": estado_anterior,
+                "nuevo": EstadoEstudio.EN_ANALISIS_BIOINFORMATICA.value,
+            },
+            "analisis_id": {"anterior": None, "nuevo": nuevo_analisis.id},
+            "tipo_analisis": {"anterior": None, "nuevo": TipoAnalisis.REANALISIS.value},
+            "nuevos_genes": {"anterior": simbolos_previos, "nuevo": simbolos_nuevos},
+        }
+        if nueva_patologia is not None and patologia_anterior_id != nueva_patologia.id:
+            cambios_auditoria["patologia_sospechada_id"] = {
+                "anterior": patologia_anterior_id,
+                "nuevo": nueva_patologia.id,
+            }
+
+        auditoria_service.registrar_modificacion(
+            entidad_tipo=EntidadAuditable.ESTUDIO,
+            entidad_id=estudio.id,
+            accion=TipoAccionAuditoria.CAMBIO_ESTADO,
+            usuario_id=usuario.id,
+            origen="usuario",
+            cambios=cambios_auditoria,
+            motivo="Solicitud de reanalisis de estudio",
+            ip_origen=ip_origen,
+        )
+
+        aviso_msg = (
+            f"Reanalisis solicitado para estudio #{estudio.id} sobre nuevos genes: "
+            f"{', '.join(simbolos_nuevos)}."
+        )
+        for bio_u in bioinformaticos:
+            bioinformatica_repo.crear_aviso(
+                usuario_id=bio_u.id,
+                mensaje=aviso_msg,
+                canal=CanalAviso.APP,
+                enviado=True,
+                enviado_en=ahora,
+            )
+            avisos_mail.append(
+                bioinformatica_repo.crear_aviso(
+                    usuario_id=bio_u.id,
+                    mensaje=aviso_msg,
+                    canal=CanalAviso.MAIL,
+                    enviado=False,
+                )
+            )
+            if bio_u.email and bio_u.email not in destinatarios:
+                destinatarios.append(bio_u.email)
+
+        bioinformatica_repo.guardar_cambios()
+    except (IntegrityError, SQLAlchemyError) as exc:
+        bioinformatica_repo.deshacer_cambios()
+        raise ErrorDominio(
+            "Error al registrar la solicitud de reanalisis. Intente nuevamente.",
+            codigo="DB_ERROR",
+            http_status=500,
+            reintentable=True,
+        ) from exc
+
+    _notificar_bioinformaticos_reanalisis(
+        estudio=estudio,
+        analisis_id=nuevo_analisis.id,
+        simbolos_nuevos=simbolos_nuevos,
+        avisos_mail=avisos_mail,
+        destinatarios=destinatarios,
+        aviso_msg=aviso_msg,
+        email_client=email_client,
+    )
+
+    logger.info(
+        "[estudio_service] reanalisis_creado estudio_id=%s analisis_id=%s solicitado_por_medico_id=%s",
+        estudio.id,
+        nuevo_analisis.id,
+        medico.id,
+    )
+    return {
+        "estudio_id": estudio.id,
+        "analisis_id": nuevo_analisis.id,
+        "tipo_analisis": TipoAnalisis.REANALISIS.value,
+        "solicitado_por_medico_id": medico.id,
+        "nuevos_genes": [
+            {"gen_id": g.id, "simbolo": g.simbolo, "nombre": g.nombre}
+            for g in nuevos_genes
+        ],
+        "estado_estudio": estudio.estado.value,
+        "requiere_nueva_muestra": False,
+    }
+
+
+def buscar_genes_catalogo(
+    *,
+    q: str | None = None,
+    limite: int = 30,
+    bioinformatica_client: Any | None = None,
+) -> list[dict[str, Any]]:
+    """Lista genes locales y complementa por prefijo con Apigen si hay query de >= 2 caracteres."""
+    if limite <= 0 or limite > 100:
+        raise ErrorDominio(
+            "El parametro limite debe ser un entero entre 1 y 100.",
+            codigo="DATOS_INVALIDOS",
+            http_status=400,
+        )
+
+    locales = clinica_repo.listar_genes_locales(q, limite=limite)
+    por_simbolo: dict[str, dict[str, Any]] = {
+        g.simbolo.upper(): {
+            "gen_id": g.id,
+            "simbolo": g.simbolo,
+            "nombre": g.nombre,
+            "es_hallazgo_secundario": bool(g.es_hallazgo_secundario),
+        }
+        for g in locales
+    }
+
+    consulta = (q or "").strip()
+    puede_consultar_externo = len(consulta) >= 2 and (
+        bioinformatica_client is not None
+        or not (
+            has_app_context()
+            and current_app.config.get("TESTING")
+            and not current_app.config.get("BIOINFORMATICA_CLIENT")
+        )
+    )
+    if puede_consultar_externo and len(por_simbolo) < limite:
+        try:
+            cliente = _resolver_bioinformatica_client(bioinformatica_client)
+            remotos = cliente.buscar_genes(consulta, limite=limite)
+            if isinstance(remotos, list):
+                for item in remotos:
+                    simbolo = (
+                        str(item.get("simbolo", "")).strip().upper()
+                        if isinstance(item, dict)
+                        else str(item).strip().upper()
+                    )
+                    if simbolo and simbolo not in por_simbolo:
+                        por_simbolo[simbolo] = {
+                            "gen_id": None,
+                            "simbolo": simbolo,
+                            "nombre": item.get("nombre") if isinstance(item, dict) else None,
+                            "es_hallazgo_secundario": False,
+                        }
+        except (ClienteError, httpx.HTTPStatusError, OSError, ValueError) as exc:
+            logger.warning("[bioinformatica_client] fallback catalogo genes q=%r err=%s", consulta, exc)
+
+    return sorted(por_simbolo.values(), key=lambda g: g["simbolo"])[:limite]

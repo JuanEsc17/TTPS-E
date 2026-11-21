@@ -536,22 +536,16 @@ def _obtener_estudio_y_resultado_autorizado(
 
     _verificar_acceso_resultado(estudio, usuario)
 
-    if estudio.estado != EstadoEstudio.RESULTADO_CARGADO:
-        raise ErrorDominio(
-            "El resultado de este estudio aun no se encuentra disponible.",
-            codigo="RESULTADO_AUN_NO_DISPONIBLE",
-            http_status=409,
-        )
-
     completados = [a for a in estudio.analisis if a.resultado is not None]
-    if not completados:
-        raise ErrorDominio(
-            "El resultado de este estudio aun no se encuentra disponible.",
-            codigo="RESULTADO_AUN_NO_DISPONIBLE",
-            http_status=409,
-        )
 
+    # Permitir descargar un analisis historico ya completado aunque haya un reanalisis en curso (Escenario 17)
     if analisis_id is not None:
+        if not completados:
+            raise ErrorDominio(
+                "El resultado de este estudio aun no se encuentra disponible.",
+                codigo="RESULTADO_AUN_NO_DISPONIBLE",
+                http_status=409,
+            )
         analisis = next((a for a in completados if a.id == analisis_id), None)
         if analisis is None:
             raise ErrorDominio(
@@ -560,6 +554,12 @@ def _obtener_estudio_y_resultado_autorizado(
                 http_status=404,
             )
     else:
+        if estudio.estado != EstadoEstudio.RESULTADO_CARGADO or not completados:
+            raise ErrorDominio(
+                "El resultado de este estudio aun no se encuentra disponible.",
+                codigo="RESULTADO_AUN_NO_DISPONIBLE",
+                http_status=409,
+            )
         analisis = completados[-1]
 
     assert analisis.resultado is not None
@@ -654,6 +654,8 @@ def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
                     est.fecha_reevaluacion_vus.isoformat() if est.fecha_reevaluacion_vus else None
                 ),
                 "tiene_resultado": tiene_resultado,
+                "tiene_datos_crudos": est.datos_crudos is not None,
+                "cantidad_analisis": len(est.analisis),
                 "resultado": (
                     {
                         "resultado_id": res.id,
@@ -726,6 +728,80 @@ def consultar_resultado_estudio(*, estudio_id: int, usuario: Usuario) -> dict[st
             _serializar_resultado_analisis(estudio.id, a, con_query_analisis=True)
             for a in completados
         ],
+    }
+
+
+def consultar_historial_analisis(*, estudio_id: int, usuario: Usuario) -> dict[str, Any]:
+    """Devuelve el historial completo de analisis (inicial y reanalisis) de un estudio (Escenario 17)."""
+    if usuario.rol not in _ROLES_PERMITIDOS_RESULTADO:
+        _denegar_acceso_resultado(estudio_id, usuario)
+
+    estudio = bioinformatica_repo.buscar_estudio_por_id(estudio_id)
+    if estudio is None:
+        raise ErrorDominio("Estudio no encontrado.", codigo="ESTUDIO_NO_ENCONTRADO", http_status=404)
+
+    _verificar_acceso_resultado(estudio, usuario)
+
+    genes_ya_analizados = sorted(
+        {
+            ag.gen.simbolo
+            for a in estudio.analisis
+            for ag in a.genes
+            if ag.gen is not None
+        }
+    )
+    historial: list[dict[str, Any]] = []
+    for a in estudio.analisis:
+        res = a.resultado
+        historial.append(
+            {
+                "analisis_id": a.id,
+                "tipo": a.tipo.value,
+                "solicitado_por_medico_id": a.solicitado_por_id,
+                "bioinformatico_id": a.bioinformatico_id,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "genes": sorted(ag.gen.simbolo for ag in a.genes if ag.gen is not None),
+                "resultado": (
+                    {
+                        "resultado_id": res.id,
+                        "positivo": bool(res.positivo),
+                        "diagnostico": res.diagnostico.value,
+                        "fecha_proximo_estudio": (
+                            res.fecha_proximo_estudio.isoformat()
+                            if res.fecha_proximo_estudio
+                            else None
+                        ),
+                        "generado_en": res.generado_en.isoformat() if res.generado_en else None,
+                        "pdf_url": f"/api/estudios/{estudio.id}/analisis/{a.id}/resultado/pdf",
+                    }
+                    if res is not None
+                    else None
+                ),
+            }
+        )
+
+    tiene_pendiente = any(a.resultado is None for a in estudio.analisis)
+    puede_reanalizar = (
+        usuario.rol in (Rol.MEDICO, Rol.GERENTE_MEDICO)
+        and estudio.estado == EstadoEstudio.RESULTADO_CARGADO
+        and estudio.datos_crudos is not None
+        and not tiene_pendiente
+    )
+    return {
+        "estudio_id": estudio.id,
+        "estado_estudio": estudio.estado.value,
+        "datos_crudos_disponibles": estudio.datos_crudos is not None,
+        "puede_solicitar_reanalisis": puede_reanalizar,
+        "patologia_sospechada": (
+            {
+                "id": estudio.patologia_sospechada.id,
+                "nombre": estudio.patologia_sospechada.nombre,
+            }
+            if estudio.patologia_sospechada is not None
+            else None
+        ),
+        "genes_ya_analizados": genes_ya_analizados,
+        "historial_analisis": historial,
     }
 
 

@@ -1,10 +1,12 @@
-"""Blueprint de endpoints para consulta/descarga de resultados y avisos (Escenarios 16 y 37)."""
+"""Blueprint de endpoints para resultados, reanalisis y avisos (Escenarios 16, 17 y 37)."""
 from __future__ import annotations
 
 from flask import Blueprint, Response, g, jsonify, make_response, request
-from src.core.services import resultado_service
+from src.core.models import Rol
+from src.core.services import bioinformatica_service, resultado_service
 from src.core.services.excepciones import ErrorDominio
 from src.web.decorators.auth import requiere_sesion
+from src.web.validators.bioinformatica_validator import SolicitudReanalisisSchema
 
 resultados_bp = Blueprint("resultados", __name__, url_prefix="/api")
 
@@ -104,3 +106,68 @@ def descargar_resultado_pdf(estudio_id: int):
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+@resultados_bp.get("/estudios/<int:estudio_id>/analisis/<int:analisis_id>/resultado/pdf")
+@requiere_sesion()
+def descargar_resultado_analisis_pdf(estudio_id: int, analisis_id: int):
+    pdf_bytes, nombre_archivo = resultado_service.descargar_pdf_resultado(
+        estudio_id=estudio_id,
+        usuario=g.usuario_actual,
+        analisis_id=analisis_id,
+    )
+    return Response(
+        pdf_bytes,
+        status=200,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre_archivo}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@resultados_bp.get("/estudios/<int:estudio_id>/analisis")
+@requiere_sesion()
+def consultar_historial_analisis(estudio_id: int):
+    datos = resultado_service.consultar_historial_analisis(
+        estudio_id=estudio_id,
+        usuario=g.usuario_actual,
+    )
+    resp = make_response(jsonify({"ok": True, **datos}), 200)
+    resp.headers["Cache-Control"] = "private, no-store"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+@resultados_bp.post("/estudios/<int:estudio_id>/reanalisis")
+@requiere_sesion(
+    roles=(Rol.MEDICO, Rol.GERENTE_MEDICO),
+    codigo_rol_denegado="SOLO_MEDICO",
+)
+def solicitar_reanalisis_estudio(estudio_id: int):
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        payload = {}
+    datos = SolicitudReanalisisSchema().load(payload)
+    resultado = bioinformatica_service.solicitar_reanalisis_estudio(
+        estudio_id=estudio_id,
+        usuario=g.usuario_actual,
+        nuevos_genes_simbolos=datos["nuevos_genes_simbolos"],
+        genes_ids=datos["genes_ids"],
+        nueva_patologia_sospechada_id=datos["nueva_patologia_sospechada_id"],
+        ip_origen=request.remote_addr,
+    )
+    return jsonify({"ok": True, **resultado}), 201
+
+
+@resultados_bp.get("/genes")
+@requiere_sesion(roles=(Rol.MEDICO, Rol.GERENTE_MEDICO, Rol.BIOINFORMATICO))
+def buscar_genes_catalogo():
+    limite = _parsear_entero_positivo_opcional("limite")
+    genes = bioinformatica_service.buscar_genes_catalogo(
+        q=request.args.get("q"),
+        limite=limite if limite is not None else 30,
+    )
+    return jsonify({"ok": True, "genes": genes}), 200

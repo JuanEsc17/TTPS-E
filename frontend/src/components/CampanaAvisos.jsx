@@ -201,6 +201,10 @@ export default function CampanaAvisos({ sesion }) {
                                         puedeAbrirResultado &&
                                         Boolean(aviso.estudio_id) &&
                                         /resultado/i.test(aviso.mensaje || "");
+                                    const esBandejaBio =
+                                        rol === "bioinformatico" &&
+                                        !esResultado &&
+                                        /reanalisis|bioinformatic/i.test(aviso.mensaje || "");
                                     const fecha = formatearFechaAviso(
                                         aviso.enviado_en || aviso.created_at
                                     );
@@ -225,7 +229,7 @@ export default function CampanaAvisos({ sesion }) {
                                             </div>
                                             <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                                                 <span>{fecha}</span>
-                                                {esResultado && (
+                                                {esResultado ? (
                                                     <Link
                                                         to={`/estudios/${aviso.estudio_id}/resultado`}
                                                         onClick={() => setAbierto(false)}
@@ -233,7 +237,15 @@ export default function CampanaAvisos({ sesion }) {
                                                     >
                                                         Ver resultado →
                                                     </Link>
-                                                )}
+                                                ) : esBandejaBio ? (
+                                                    <Link
+                                                        to="/bioinformatica/cola"
+                                                        onClick={() => setAbierto(false)}
+                                                        className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
+                                                    >
+                                                        Ir a bandeja →
+                                                    </Link>
+                                                ) : null}
                                             </div>
                                         </li>
                                     );
