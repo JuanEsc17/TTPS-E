@@ -10,6 +10,7 @@ from src.core.models.enums import EstadoEstudio
 from src.core.models.estudios import Estudio
 from src.core.models.reglas import MAX_AUSENCIAS
 from src.core.repos.turno_repo import TurnoRepo
+from src.core.services.formato_correo import asunto_correo, formatear_correo
 from src.core.services.turno_service import TurnoService
 
 # Los centros atienden hasta las 18:00 hs; al cierre del dia se procesan las ausencias
@@ -40,27 +41,58 @@ class AusenciaService:
     ) -> tuple[str, str]:
         """Construye el asunto y cuerpo en texto plano del mail de inasistencia."""
         fecha_str = inicio_turno.strftime("%d/%m/%Y a las %H:%M hs")
+        usuario = estudio.paciente.usuario if (estudio.paciente and estudio.paciente.usuario) else None
+        saludo = f"Estimado/a {usuario.nombre} {usuario.apellido}," if usuario else None
+
         if alcanzo_limite:
-            asunto = f"Perdida de pago por {MAX_AUSENCIAS} ausencias - Estudio #{estudio.id}"
-            cuerpo = (
-                f"Se registro una nueva inasistencia a su turno del {fecha_str} "
-                f"para el Estudio #{estudio.id}.\n\n"
-                f"Al haber alcanzado el limite maximo de {MAX_AUSENCIAS} ausencias, "
-                f"el pago anterior fue anulado y su estudio volvio al estado Creado.\n"
-                f"Para volver a solicitar un turno de extraccion debera abonar nuevamente el presupuesto."
+            asunto = asunto_correo(f"Pérdida de pago por {MAX_AUSENCIAS} ausencias · Estudio #{estudio.id}")
+            cuerpo = formatear_correo(
+                titulo="Límite de ausencias alcanzado",
+                saludo=saludo,
+                introduccion=(
+                    f"Se registró una nueva inasistencia a su turno del {fecha_str} "
+                    f"para el Estudio #{estudio.id}."
+                ),
+                destacado=[
+                    f"Ausencias acumuladas: {estudio.ausencias} de {MAX_AUSENCIAS}",
+                    "Estado actual del estudio: Creado",
+                ],
+                secciones=[
+                    (
+                        "Impacto en el estudio",
+                        [
+                            f"Al haber alcanzado el límite máximo de {MAX_AUSENCIAS} ausencias, el pago anterior fue anulado y su estudio volvió al estado Creado.",
+                            "Para volver a solicitar un turno de extracción deberá abonar nuevamente el presupuesto.",
+                        ],
+                    )
+                ],
+                cierre="Puede gestionar un nuevo presupuesto y turno desde el portal cuando lo desee.",
             )
             return asunto, cuerpo
 
         restantes = MAX_AUSENCIAS - estudio.ausencias
-        asunto = (
-            f"Inasistencia a turno de extraccion ({estudio.ausencias}/{MAX_AUSENCIAS}) "
-            f"- Estudio #{estudio.id}"
+        asunto = asunto_correo(
+            f"Inasistencia a turno ({estudio.ausencias}/{MAX_AUSENCIAS}) · Estudio #{estudio.id}"
         )
-        cuerpo = (
-            f"Se registro su inasistencia al turno del {fecha_str} para el Estudio #{estudio.id}.\n\n"
-            f"Ausencias acumuladas: {estudio.ausencias} de {MAX_AUSENCIAS}.\n"
-            f"Puede solicitar un nuevo turno sin cargo adicional. "
-            f"Recuerde que le quedan {restantes} oportunidad(es) antes de perder el pago."
+        cuerpo = formatear_correo(
+            titulo="Registro de inasistencia a turno",
+            saludo=saludo,
+            introduccion=(
+                f"Se registró su inasistencia al turno del {fecha_str} para el Estudio #{estudio.id}."
+            ),
+            destacado=[
+                f"Ausencias acumuladas: {estudio.ausencias} de {MAX_AUSENCIAS}",
+                f"Oportunidades restantes: {restantes}",
+            ],
+            secciones=[
+                (
+                    "Cómo continuar",
+                    [
+                        "Puede solicitar un nuevo turno de extracción sin cargo adicional desde el portal.",
+                        f"Recuerde que le quedan {restantes} oportunidad(es) antes de perder el pago del estudio.",
+                    ],
+                )
+            ],
         )
         return asunto, cuerpo
 

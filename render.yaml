@@ -1,0 +1,70 @@
+services:
+  # Backend Flask + Gunicorn (Docker con Python 3.13)
+  - type: web
+    name: ttps-exoma-backend
+    runtime: docker
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /api/health
+    envVars:
+      - key: TZ
+        value: America/Argentina/Buenos_Aires
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: GUNICORN_TIMEOUT
+        value: "120"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: DB_MAX_OVERFLOW
+        value: "2"
+      - key: SUPABASE_STORAGE_BUCKET
+        value: exoma-storage
+      # Completar desde el panel de Render (valores sensibles)
+      - key: DATABASE_URL
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: BIOINFORMATICA_EQUIPO_EMAIL
+        sync: false
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: FAMILIOGRAMA_API_KEY
+        sync: false
+      - key: SNOMED_API_KEY
+        sync: false
+      - key: APIGEN_API_KEY
+        sync: false
+      - key: CHATBOT_TOKEN
+        sync: false
+      - key: CDSS_API_KEY
+        sync: false
+      - key: CUPONES_API_KEY
+        sync: false
+      - key: FEDEX_API_KEY
+        sync: false
+      - key: OBRA_SOCIAL_API_KEY
+        sync: false
+
+  # Frontend React + Vite (Static Site gratuito con proxy /api -> backend)
+  - type: web
+    name: ttps-exoma-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+    routes:
+      # Si Render asigna un subdominio distinto al backend (ej. con sufijo), actualizar esta URL
+      - type: rewrite
+        source: /api/*
+        destination: https://ttps-exoma-backend.onrender.com/api/*
+      - type: rewrite
+        source: /*
+        destination: /index.html

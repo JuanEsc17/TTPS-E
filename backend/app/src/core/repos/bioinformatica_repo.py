@@ -1,6 +1,7 @@
 """Repositorio de acceso a datos para datos crudos, analisis bioinformatico, variantes y resultados."""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -24,6 +25,7 @@ from src.core.models import (
     EstudioGen,
     Gen,
     Medico,
+    OrigenGen,
     Paciente,
     Resultado,
     TipoAnalisis,
@@ -151,6 +153,42 @@ def copiar_genes_a_analisis(analisis_id: int, genes_ids: list[int]) -> None:
     """Asocia genes a un analisis existente sin duplicar claves."""
     for gen_id in dict.fromkeys(genes_ids):
         db.session.add(AnalisisGen(analisis_id=analisis_id, gen_id=gen_id))
+    db.session.flush()
+
+
+def crear_analisis_reanalisis(
+    *,
+    estudio_id: int,
+    solicitado_por_id: int,
+    genes_ids: list[int],
+) -> Analisis:
+    """Crea una nueva fila Analisis(REANALISIS) y asocia los nuevos genes sin tocar el historial."""
+    analisis = Analisis(
+        estudio_id=estudio_id,
+        tipo=TipoAnalisis.REANALISIS,
+        bioinformatico_id=None,
+        solicitado_por_id=solicitado_por_id,
+    )
+    db.session.add(analisis)
+    db.session.flush()
+
+    for gen_id in dict.fromkeys(genes_ids):
+        db.session.add(AnalisisGen(analisis_id=analisis.id, gen_id=gen_id))
+    db.session.flush()
+    return analisis
+
+
+def agregar_genes_estudio(
+    estudio: Estudio,
+    genes_con_origen: list[tuple[int, OrigenGen]],
+) -> None:
+    """Agrega en estudios_genes aquellos genes que aun no estaban asociados al estudio."""
+    existentes = {eg.gen_id for eg in estudio.genes}
+    for gen_id, origen in genes_con_origen:
+        if gen_id in existentes:
+            continue
+        existentes.add(gen_id)
+        db.session.add(EstudioGen(estudio_id=estudio.id, gen_id=gen_id, origen=origen))
     db.session.flush()
 
 
@@ -307,6 +345,52 @@ def marcar_avisos_enviados(avisos: list[Aviso], enviado_en: datetime) -> None:
     for aviso in avisos:
         aviso.enviado = True
         aviso.enviado_en = enviado_en
+
+
+def marcar_avisos_estudio_leidos(usuario_id: int, estudio_id: int) -> int:
+    """Marca como leidos los avisos no leidos del usuario referidos al estudio."""
+    # shortcut: Aviso no tiene FK estudio_id; filtra por token 'estudio #<id>' en mensaje, migrar si se agrega columna estudio_id
+    token = f"estudio #{estudio_id}"
+    stmt = select(Aviso).where(
+        Aviso.usuario_id == usuario_id,
+        Aviso.leido.is_(False),
+        Aviso.mensaje.ilike(f"%{token}%"),
+    )
+    patron = re.compile(rf"estudio #{estudio_id}(?!\d)", re.IGNORECASE)
+    actualizados = 0
+    for aviso in db.session.scalars(stmt).all():
+        if patron.search(aviso.mensaje):
+            aviso.leido = True
+            actualizados += 1
+    return actualizados
+
+
+def listar_avisos_usuario(
+    usuario_id: int,
+    *,
+    canal: CanalAviso = CanalAviso.APP,
+    solo_no_leidos: bool = False,
+    limite: int = 50,
+) -> list[Aviso]:
+    """Lista avisos del usuario en el canal indicado ordenados del mas reciente al mas antiguo."""
+    stmt = select(Aviso).where(
+        Aviso.usuario_id == usuario_id,
+        Aviso.canal == canal,
+    )
+    if solo_no_leidos:
+        stmt = stmt.where(Aviso.leido.is_(False))
+    stmt = stmt.order_by(Aviso.created_at.desc(), Aviso.id.desc()).limit(limite)
+    return list(db.session.scalars(stmt).all())
+
+
+def contar_avisos_no_leidos(usuario_id: int, *, canal: CanalAviso = CanalAviso.APP) -> int:
+    """Cuenta los avisos no leidos del usuario en el canal indicado."""
+    stmt = select(func.count(Aviso.id)).where(
+        Aviso.usuario_id == usuario_id,
+        Aviso.canal == canal,
+        Aviso.leido.is_(False),
+    )
+    return int(db.session.scalar(stmt) or 0)
 
 
 def guardar_cambios() -> None:

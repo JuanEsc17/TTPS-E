@@ -12,6 +12,7 @@ from src.core.models.estudios import Estudio
 from src.core.models.reglas import MAX_AUSENCIAS
 from src.core.models.turnos import CentroExtraccion
 from src.core.repos.turno_repo import TurnoRepo
+from src.core.services.formato_correo import asunto_correo, formatear_correo
 
 # Constantes de agenda segun LEL (Lunes a viernes 9 a 18 cada 15 min, sin feriados)
 HORA_APERTURA = time(9, 0)
@@ -349,21 +350,43 @@ class TurnoService:
                         if (estudio.paciente and estudio.paciente.usuario)
                         else ""
                     )
-                    cuerpo_email = (
-                        f"Estimado/a {estudio.paciente.usuario.nombre} {estudio.paciente.usuario.apellido}:\n\n"
-                        f"Su turno de extraccion de sangre para el Estudio #{estudio.id} ha sido reservado con exito.\n\n"
-                        f"Detalle del turno:\n"
-                        f"- Centro de extraccion: {centro.nombre}\n"
-                        f"- Direccion: {centro.direccion}, {centro.provincia}\n"
-                        f"- Fecha y hora: {inicio.strftime('%d/%m/%Y a las %H:%M hs')}\n"
-                        f"- Duracion: {DURACION_SLOT_MINUTOS} minutos\n\n"
-                        f"Indicaciones importantes:\n"
-                        f"1. No requiere ayuno ni preparacion especial.\n"
-                        f"2. Recuerde llevar impresa y firmada la plantilla de Consentimiento informado y la Orden de extraccion.\n"
-                        f"3. Limite de inasistencias: El sistema permite hasta {MAX_AUSENCIAS} ausencias maximas. Al acumular {MAX_AUSENCIAS} ausencias perdera el pago del estudio.\n"
+                    cuerpo_email = formatear_correo(
+                        titulo="Confirmación de turno de extracción",
+                        saludo=(
+                            f"Estimado/a {estudio.paciente.usuario.nombre} "
+                            f"{estudio.paciente.usuario.apellido},"
+                        ),
+                        introduccion=(
+                            f"Su turno de extracción de sangre para el Estudio #{estudio.id} "
+                            "ha sido reservado con éxito."
+                        ),
+                        destacado=[
+                            f"Fecha y hora: {inicio.strftime('%d/%m/%Y · %H:%M hs')}",
+                            f"Centro: {centro.nombre}",
+                        ],
+                        secciones=[
+                            (
+                                "Detalle del turno",
+                                [
+                                    f"Estudio: #{estudio.id}",
+                                    f"Centro de extracción: {centro.nombre}",
+                                    f"Dirección: {centro.direccion}, {centro.provincia}",
+                                    f"Duración estimada: {DURACION_SLOT_MINUTOS} minutos",
+                                ],
+                            ),
+                            (
+                                "Indicaciones importantes",
+                                [
+                                    "No requiere ayuno ni preparación especial.",
+                                    "Recuerde llevar impresa y firmada la Orden de extraccion y la plantilla de Consentimiento informado.",
+                                    f"Límite de inasistencias: se permiten hasta {MAX_AUSENCIAS} ausencias máximas. Al acumular {MAX_AUSENCIAS} ausencias perderá el pago del estudio.",
+                                ],
+                            ),
+                        ],
+                        cierre="Si no puede asistir, puede cancelar y reprogramar el turno desde el portal.",
                     )
                     cliente_email.enviar_aviso(
-                        asunto=f"Confirmacion de turno de extraccion - Estudio #{estudio.id}",
+                        asunto=asunto_correo(f"Confirmación de turno de extracción · Estudio #{estudio.id}"),
                         mensaje=cuerpo_email,
                         destinatarios=[email_destino],
                         referencia=f"TURNO-{turno.id}",

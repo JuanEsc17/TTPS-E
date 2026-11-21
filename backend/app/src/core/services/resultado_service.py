@@ -1,16 +1,15 @@
-"""Servicio para generacion, notificacion, consulta y descarga de resultados de exoma (Escenario 16)."""
+"""Servicio para generacion, notificacion, consulta y descarga de resultados de exoma (Escenarios 16 y 37)."""
 from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn
 
 from flask import current_app, has_app_context
-from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 from sqlalchemy.exc import SQLAlchemyError
 from src.clients import (
     ClienteConexionError,
@@ -29,16 +28,20 @@ from src.core.models import (
     Resultado,
     Rol,
     TipoAccionAuditoria,
+    TipoAnalisis,
     Usuario,
     Variante,
     calcular_conclusion_diagnostica,
 )
 from src.core.repos import bioinformatica_repo
-from src.core.services import auditoria_service
+from src.core.services import almacenamiento_service, auditoria_service
 from src.core.services.excepciones import ErrorDominio
+from src.core.services.formato_correo import asunto_correo, formatear_correo
+from src.core.services.pdf_resultado import construir_pdf_resultado
 
 logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
+_PATRON_ESTUDIO_AVISO = re.compile(r"estudio #(\d+)(?!\d)", re.IGNORECASE)
 _ROLES_PERMITIDOS_RESULTADO = frozenset(
     {Rol.PACIENTE, Rol.MEDICO, Rol.GERENTE_MEDICO, Rol.BIOINFORMATICO}
 )
@@ -50,22 +53,7 @@ def ahora_utc_naive() -> datetime:
 
 def resolver_ruta_storage(ruta_relativa: str) -> Path:
     """Resuelve una ruta logica 'storage/...' dentro del directorio de almacenamiento configurado."""
-    if has_app_context() and current_app.config.get("STORAGE_DIR"):
-        base_dir = Path(str(current_app.config["STORAGE_DIR"])).resolve()
-    else:
-        base_dir = (Path(__file__).resolve().parents[3] / "storage").resolve()
-
-    limpia = ruta_relativa.replace("\\", "/").lstrip("/")
-    limpia = limpia.removeprefix("storage/")
-
-    ruta_fisica = (base_dir / limpia).resolve()
-    if not ruta_fisica.is_relative_to(base_dir):
-        raise ErrorDominio(
-            "Ruta de archivo fuera del directorio permitido.",
-            codigo="RUTA_ARCHIVO_INVALIDA",
-            http_status=400,
-        )
-    return ruta_fisica
+    return almacenamiento_service.resolver_ruta_local(ruta_relativa)
 
 
 def resolver_email_client(
@@ -135,10 +123,6 @@ def enviar_email_resiliente(
     return False
 
 
-def _texto_latin1(valor: Any) -> str:
-    return str(valor or "-").encode("latin-1", "replace").decode("latin-1")
-
-
 def _generar_pdf_resultado(
     *,
     estudio: Estudio,
@@ -148,152 +132,48 @@ def _generar_pdf_resultado(
     fecha_proximo_estudio: Any,
     generado_en: datetime,
     ruta_fisica: Path,
+    resultado_id: int | None = None,
+    pdf_path_log: str | None = None,
+    ruta_logica: str | None = None,
 ) -> None:
-    """Compila el informe clinico del estudio en PDF usando fpdf2."""
+    """Compila el informe clinico del estudio en PDF vectorial usando fpdf2."""
+    destino_logico = ruta_logica or pdf_path_log
     try:
         ruta_fisica.parent.mkdir(parents=True, exist_ok=True)
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-
-        pdf.set_font("Helvetica", "B", 15)
-        pdf.cell(
-            0,
-            10,
-            _texto_latin1("Laboratorio de Exoma Clinico - Informe de Resultado"),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
+        pdf = construir_pdf_resultado(
+            estudio=estudio,
+            analisis=analisis,
+            variantes=variantes,
+            diagnostico=diagnostico,
+            fecha_proximo_estudio=fecha_proximo_estudio,
+            generado_en=generado_en,
         )
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(
-            0,
-            6,
-            _texto_latin1(
-                f"Estudio #{estudio.id} | Analisis #{analisis.id} ({analisis.tipo.value}) | "
-                f"Fecha: {generado_en.strftime('%d/%m/%Y %H:%M')}"
-            ),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-        pdf.ln(3)
-
-        paciente_u = estudio.paciente.usuario if estudio.paciente else None
-        medico_u = estudio.medico.usuario if estudio.medico else None
-        patologia = estudio.patologia_sospechada
-
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 7, _texto_latin1("Datos clinicos"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        if paciente_u and estudio.paciente:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1(
-                    f"Paciente: {paciente_u.nombre} {paciente_u.apellido} | "
-                    f"DNI: {estudio.paciente.dni} | Nacimiento: {estudio.paciente.fecha_nacimiento}"
-                ),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        if medico_u and estudio.medico:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1(
-                    f"Medico tratante: {medico_u.nombre} {medico_u.apellido} (Mat. {estudio.medico.matricula})"
-                ),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        if patologia:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1(f"Patologia sospechada: {patologia.nombre}"),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-
-        simbolos_genes = ", ".join(
-            sorted(
-                {
-                    f"{ag.gen.simbolo} ({ag.gen.nombre})" if ag.gen.nombre else ag.gen.simbolo
-                    for ag in analisis.genes
-                    if ag.gen is not None
-                }
-            )
-        ) or "Sin genes asociados"
-        pdf.multi_cell(
-            0,
-            6,
-            _texto_latin1(f"Genes analizados: {simbolos_genes}"),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-        pdf.ln(3)
-
-        etiqueta_diag = {
-            ConclusionDiagnostica.POSITIVO: "POSITIVO (variante patogenica detectada)",
-            ConclusionDiagnostica.VUS: "VUS (Variante de Significado Incierto)",
-            ConclusionDiagnostica.NEGATIVO: "NEGATIVO (sin variantes patogenicas ni VUS)",
-        }[diagnostico]
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(
-            0,
-            8,
-            _texto_latin1(f"Conclusion diagnostica: {etiqueta_diag}"),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-
-        if diagnostico == ConclusionDiagnostica.VUS and fecha_proximo_estudio is not None:
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.multi_cell(
-                0,
-                6,
-                _texto_latin1(
-                    f"Recomendacion de nuevo estudio / reevaluacion VUS: "
-                    f"{fecha_proximo_estudio.strftime('%d/%m/%Y')} ({fecha_proximo_estudio.isoformat()})"
-                ),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        pdf.ln(3)
-
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 7, _texto_latin1("Variantes encontradas"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        if not variantes:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1("No se detectaron variantes respecto al genoma de referencia."),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        else:
-            for v in variantes:
-                simbolo = v.gen.simbolo if v.gen else f"Gen#{v.gen_id}"
-                clinvar = v.clinvar_id or "-"
-                pdf.multi_cell(
-                    0,
-                    6,
-                    _texto_latin1(
-                        f"- {simbolo} | {v.notacion} | ClinVar: {clinvar} | Clasificacion: {v.clasificacion.value}"
-                    ),
-                    new_x=XPos.LMARGIN,
-                    new_y=YPos.NEXT,
-                )
 
         ruta_tmp = ruta_fisica.with_name(f".{ruta_fisica.name}.{os.getpid()}.{time.time_ns()}.tmp")
         try:
             pdf.output(str(ruta_tmp))
-            os.replace(ruta_tmp, ruta_fisica)
+            if destino_logico and almacenamiento_service.usar_storage_remoto():
+                almacenamiento_service.guardar_bytes(
+                    destino_logico,
+                    ruta_tmp.read_bytes(),
+                    content_type="application/pdf",
+                )
+            else:
+                os.replace(ruta_tmp, ruta_fisica)
         finally:
             ruta_tmp.unlink(missing_ok=True)
     except Exception as exc:
         ruta_fisica.unlink(missing_ok=True)
+        if destino_logico and almacenamiento_service.usar_storage_remoto():
+            almacenamiento_service.eliminar_archivo(destino_logico)
+        logger.error(
+            "[resultado_service] abort_cleanup_pdf estudio_id=%s analisis_id=%s resultado_id=%s path=%r err=%s",
+            estudio.id,
+            analisis.id,
+            resultado_id,
+            pdf_path_log or str(ruta_fisica),
+            exc,
+        )
         raise ErrorDominio(
             "No se pudo generar el informe PDF del resultado. Intente nuevamente.",
             codigo="ERROR_GENERACION_PDF_RESULTADO",
@@ -327,6 +207,7 @@ def preparar_resultado_en_transaccion(
         fecha_proximo_estudio=fecha_proximo_estudio,
         generado_en=ahora,
         ruta_fisica=ruta_fisica,
+        ruta_logica=pdf_path_rel,
     )
 
     logger.info(
@@ -418,7 +299,7 @@ def preparar_resultado_en_transaccion(
             if email:
                 emails_unicos.append(email)
     except Exception:
-        ruta_fisica.unlink(missing_ok=True)
+        almacenamiento_service.eliminar_archivo(pdf_path_rel)
         raise
 
     logger.info(
@@ -428,13 +309,47 @@ def preparar_resultado_en_transaccion(
         estudio.estado.value,
     )
 
+    etiqueta_diag_correo = {
+        ConclusionDiagnostica.POSITIVO: "POSITIVO (variante patogénica detectada)",
+        ConclusionDiagnostica.VUS: "VUS · Variante de Significado Incierto",
+        ConclusionDiagnostica.NEGATIVO: "NEGATIVO (sin variantes patogénicas ni VUS)",
+    }[diagnostico]
+    tipo_etiqueta = "Reanálisis" if analisis.tipo == TipoAnalisis.REANALISIS else "Inicial"
+    destacado_mail = [f"Conclusión diagnóstica: {etiqueta_diag_correo}"]
+    if diagnostico == ConclusionDiagnostica.VUS and fecha_proximo_estudio is not None:
+        destacado_mail.append(
+            f"Reevaluación VUS sugerida: {fecha_proximo_estudio.strftime('%d/%m/%Y')} ({fecha_proximo_estudio.isoformat()})"
+        )
+    resumen_mail = [
+        f"Estudio: #{estudio.id} (Análisis #{analisis.id} · {tipo_etiqueta})",
+        f"Fecha de emisión: {ahora.strftime('%d/%m/%Y %H:%M')}",
+    ]
+    if estudio.patologia_sospechada is not None:
+        resumen_mail.append(f"Patología sospechada: {estudio.patologia_sospechada.nombre}")
+    mensaje_correo = formatear_correo(
+        titulo="Resultado de estudio disponible",
+        introduccion=f"Ya se encuentra disponible el informe clínico correspondiente al estudio #{estudio.id}.",
+        destacado=destacado_mail,
+        secciones=[
+            ("Resumen del informe", resumen_mail),
+            (
+                "Cómo consultar el resultado",
+                [
+                    "Ingresá al portal con tu usuario y contraseña para visualizar el detalle completo de variantes.",
+                    "Desde la ficha del estudio podrás descargar el informe clínico oficial en formato PDF.",
+                ],
+            ),
+        ],
+        cierre="Ante cualquier consulta sobre la interpretación clínica, comunicate con el médico tratante.",
+    )
+
     contexto_mail = {
         "estudio_id": estudio.id,
         "resultado_id": resultado.id,
         "diagnostico": diagnostico.value,
         "fecha_proximo_estudio": fecha_vus_nueva,
         "destinatarios": emails_unicos,
-        "mensaje": aviso_texto,
+        "mensaje": mensaje_correo,
     }
     return resultado, ruta_fisica, avisos_mail, contexto_mail
 
@@ -450,7 +365,7 @@ def despachar_correos_resultado(
     cliente = resolver_email_client(email_client, cliente_cls=cliente_cls)
     enviado = enviar_email_resiliente(
         cliente,
-        asunto=f"Resultado disponible - Estudio #{contexto_mail['estudio_id']}",
+        asunto=asunto_correo(f"Resultado disponible · Estudio #{contexto_mail['estudio_id']}"),
         mensaje=contexto_mail["mensaje"],
         destinatarios=contexto_mail["destinatarios"],
         referencia=f"RESULTADO-{contexto_mail['resultado_id']}",
@@ -524,22 +439,16 @@ def _obtener_estudio_y_resultado_autorizado(
 
     _verificar_acceso_resultado(estudio, usuario)
 
-    if estudio.estado != EstadoEstudio.RESULTADO_CARGADO:
-        raise ErrorDominio(
-            "El resultado de este estudio aun no se encuentra disponible.",
-            codigo="RESULTADO_AUN_NO_DISPONIBLE",
-            http_status=409,
-        )
-
     completados = [a for a in estudio.analisis if a.resultado is not None]
-    if not completados:
-        raise ErrorDominio(
-            "El resultado de este estudio aun no se encuentra disponible.",
-            codigo="RESULTADO_AUN_NO_DISPONIBLE",
-            http_status=409,
-        )
 
+    # Permitir descargar un analisis historico ya completado aunque haya un reanalisis en curso (Escenario 17)
     if analisis_id is not None:
+        if not completados:
+            raise ErrorDominio(
+                "El resultado de este estudio aun no se encuentra disponible.",
+                codigo="RESULTADO_AUN_NO_DISPONIBLE",
+                http_status=409,
+            )
         analisis = next((a for a in completados if a.id == analisis_id), None)
         if analisis is None:
             raise ErrorDominio(
@@ -548,6 +457,12 @@ def _obtener_estudio_y_resultado_autorizado(
                 http_status=404,
             )
     else:
+        if estudio.estado != EstadoEstudio.RESULTADO_CARGADO or not completados:
+            raise ErrorDominio(
+                "El resultado de este estudio aun no se encuentra disponible.",
+                codigo="RESULTADO_AUN_NO_DISPONIBLE",
+                http_status=409,
+            )
         analisis = completados[-1]
 
     assert analisis.resultado is not None
@@ -585,6 +500,16 @@ def _serializar_resultado_analisis(
             {
                 "variante_id": v.id,
                 "gen_simbolo": v.gen.simbolo if v.gen else "",
+                "gen": (
+                    {
+                        "id": v.gen.id,
+                        "simbolo": v.gen.simbolo,
+                        "nombre": v.gen.nombre,
+                        "es_hallazgo_secundario": bool(v.gen.es_hallazgo_secundario),
+                    }
+                    if v.gen is not None
+                    else None
+                ),
                 "notacion": v.notacion,
                 "clinvar_id": v.clinvar_id,
                 "clasificacion": v.clasificacion.value,
@@ -632,6 +557,8 @@ def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
                     est.fecha_reevaluacion_vus.isoformat() if est.fecha_reevaluacion_vus else None
                 ),
                 "tiene_resultado": tiene_resultado,
+                "tiene_datos_crudos": est.datos_crudos is not None,
+                "cantidad_analisis": len(est.analisis),
                 "resultado": (
                     {
                         "resultado_id": res.id,
@@ -657,16 +584,31 @@ def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
 
 
 def consultar_resultado_estudio(*, estudio_id: int, usuario: Usuario) -> dict[str, Any]:
-    """STEP 4: Devuelve el detalle del resultado actual y el historial de resultados del estudio."""
+    """Devuelve el detalle del resultado actual, su historial y marca los avisos como leidos."""
     estudio, analisis_actual, resultado_actual, completados = (
         _obtener_estudio_y_resultado_autorizado(estudio_id=estudio_id, usuario=usuario)
     )
+    # Al abrir el resultado (Escenario 37 STEP 2), los avisos del usuario sobre este estudio pasan a leidos.
+    # Si se agrega acceso delegado por vinculo familiar (Escenario 41), omitir este paso en ese modo.
+    try:
+        if bioinformatica_repo.marcar_avisos_estudio_leidos(usuario.id, estudio.id) > 0:
+            bioinformatica_repo.guardar_cambios()
+    except SQLAlchemyError as exc:
+        bioinformatica_repo.deshacer_cambios()
+        logger.warning(
+            "[resultado_service] error_marcar_avisos_leidos estudio_id=%s usuario_id=%s err=%s",
+            estudio.id,
+            usuario.id,
+            exc,
+        )
+
     logger.info(
-        '[resultado_service] resultado_consultado estudio_id=%s resultado_id=%s usuario_id=%s rol="%s"',
+        '[resultado_service] step=2_consulta_resultado estudio_id=%s resultado_id=%s usuario_id=%s rol="%s" positivo=%s',
         estudio.id,
         resultado_actual.id,
         usuario.id,
         usuario.rol.value,
+        bool(resultado_actual.positivo),
     )
     return {
         "estudio_id": estudio.id,
@@ -676,10 +618,136 @@ def consultar_resultado_estudio(*, estudio_id: int, usuario: Usuario) -> dict[st
             if estudio.fecha_reevaluacion_vus
             else None
         ),
+        "patologia_sospechada": (
+            {
+                "id": estudio.patologia_sospechada.id,
+                "nombre": estudio.patologia_sospechada.nombre,
+            }
+            if estudio.patologia_sospechada is not None
+            else None
+        ),
         "resultado_actual": _serializar_resultado_analisis(estudio.id, analisis_actual),
         "historial_resultados": [
             _serializar_resultado_analisis(estudio.id, a, con_query_analisis=True)
             for a in completados
+        ],
+    }
+
+
+def consultar_historial_analisis(*, estudio_id: int, usuario: Usuario) -> dict[str, Any]:
+    """Devuelve el historial completo de analisis (inicial y reanalisis) de un estudio (Escenario 17)."""
+    if usuario.rol not in _ROLES_PERMITIDOS_RESULTADO:
+        _denegar_acceso_resultado(estudio_id, usuario)
+
+    estudio = bioinformatica_repo.buscar_estudio_por_id(estudio_id)
+    if estudio is None:
+        raise ErrorDominio("Estudio no encontrado.", codigo="ESTUDIO_NO_ENCONTRADO", http_status=404)
+
+    _verificar_acceso_resultado(estudio, usuario)
+
+    genes_ya_analizados = sorted(
+        {
+            ag.gen.simbolo
+            for a in estudio.analisis
+            for ag in a.genes
+            if ag.gen is not None
+        }
+    )
+    historial: list[dict[str, Any]] = []
+    for a in estudio.analisis:
+        res = a.resultado
+        historial.append(
+            {
+                "analisis_id": a.id,
+                "tipo": a.tipo.value,
+                "solicitado_por_medico_id": a.solicitado_por_id,
+                "bioinformatico_id": a.bioinformatico_id,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "genes": sorted(ag.gen.simbolo for ag in a.genes if ag.gen is not None),
+                "resultado": (
+                    {
+                        "resultado_id": res.id,
+                        "positivo": bool(res.positivo),
+                        "diagnostico": res.diagnostico.value,
+                        "fecha_proximo_estudio": (
+                            res.fecha_proximo_estudio.isoformat()
+                            if res.fecha_proximo_estudio
+                            else None
+                        ),
+                        "generado_en": res.generado_en.isoformat() if res.generado_en else None,
+                        "pdf_url": f"/api/estudios/{estudio.id}/analisis/{a.id}/resultado/pdf",
+                    }
+                    if res is not None
+                    else None
+                ),
+            }
+        )
+
+    tiene_pendiente = any(a.resultado is None for a in estudio.analisis)
+    puede_reanalizar = (
+        usuario.rol in (Rol.MEDICO, Rol.GERENTE_MEDICO)
+        and estudio.estado == EstadoEstudio.RESULTADO_CARGADO
+        and estudio.datos_crudos is not None
+        and not tiene_pendiente
+    )
+    return {
+        "estudio_id": estudio.id,
+        "estado_estudio": estudio.estado.value,
+        "datos_crudos_disponibles": estudio.datos_crudos is not None,
+        "puede_solicitar_reanalisis": puede_reanalizar,
+        "patologia_sospechada": (
+            {
+                "id": estudio.patologia_sospechada.id,
+                "nombre": estudio.patologia_sospechada.nombre,
+            }
+            if estudio.patologia_sospechada is not None
+            else None
+        ),
+        "genes_ya_analizados": genes_ya_analizados,
+        "historial_analisis": historial,
+    }
+
+
+def _extraer_estudio_id_aviso(mensaje: str) -> int | None:
+    match = _PATRON_ESTUDIO_AVISO.search(mensaje or "")
+    return int(match.group(1)) if match else None
+
+
+def listar_avisos_usuario(
+    *,
+    usuario: Usuario,
+    solo_no_leidos: bool = False,
+    limite: int = 50,
+) -> dict[str, Any]:
+    """Lista los avisos en aplicacion (CanalAviso.APP) del usuario autenticado."""
+    if limite <= 0 or limite > 100:
+        raise ErrorDominio(
+            "El parametro limite debe ser un entero entre 1 y 100.",
+            codigo="DATOS_INVALIDOS",
+            http_status=400,
+        )
+
+    avisos = bioinformatica_repo.listar_avisos_usuario(
+        usuario.id,
+        canal=CanalAviso.APP,
+        solo_no_leidos=solo_no_leidos,
+        limite=limite,
+    )
+    no_leidos = bioinformatica_repo.contar_avisos_no_leidos(usuario.id, canal=CanalAviso.APP)
+    return {
+        "no_leidos": no_leidos,
+        "avisos": [
+            {
+                "id": a.id,
+                "mensaje": a.mensaje,
+                "leido": bool(a.leido),
+                "canal": a.canal.value,
+                "enviado": bool(a.enviado),
+                "enviado_en": a.enviado_en.isoformat() if a.enviado_en else None,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "estudio_id": _extraer_estudio_id_aviso(a.mensaje),
+            }
+            for a in avisos
         ],
     }
 
@@ -698,7 +766,24 @@ def descargar_pdf_resultado(
     )
 
     ruta_fisica = resolver_ruta_storage(resultado.pdf_path)
-    if not ruta_fisica.is_file():
+    try:
+        pdf_bytes = almacenamiento_service.leer_bytes(resultado.pdf_path)
+    except (OSError, ClienteError) as exc:
+        logger.error(
+            "[resultado_service] error_lectura_pdf estudio_id=%s resultado_id=%s path=%r err=%s",
+            estudio.id,
+            resultado.id,
+            resultado.pdf_path,
+            exc,
+        )
+        raise ErrorDominio(
+            "No se pudo leer el informe PDF del resultado. Intente nuevamente.",
+            codigo="ERROR_LECTURA_PDF_RESULTADO",
+            http_status=500,
+            reintentable=True,
+        ) from exc
+
+    if pdf_bytes is None:
         logger.warning(
             "[resultado_service] pdf_faltante_regenerando estudio_id=%s analisis_id=%s path=%r",
             estudio.id,
@@ -717,24 +802,34 @@ def descargar_pdf_resultado(
             fecha_proximo_estudio=resultado.fecha_proximo_estudio,
             generado_en=resultado.generado_en or ahora_utc_naive(),
             ruta_fisica=ruta_fisica,
+            resultado_id=resultado.id,
+            pdf_path_log=resultado.pdf_path,
+            ruta_logica=resultado.pdf_path,
         )
+        try:
+            pdf_bytes = almacenamiento_service.leer_bytes(resultado.pdf_path)
+        except (OSError, ClienteError) as exc:
+            logger.error(
+                "[resultado_service] error_lectura_pdf estudio_id=%s resultado_id=%s path=%r err=%s",
+                estudio.id,
+                resultado.id,
+                resultado.pdf_path,
+                exc,
+            )
+            raise ErrorDominio(
+                "No se pudo leer el informe PDF del resultado. Intente nuevamente.",
+                codigo="ERROR_LECTURA_PDF_RESULTADO",
+                http_status=500,
+                reintentable=True,
+            ) from exc
 
-    try:
-        pdf_bytes = ruta_fisica.read_bytes()
-    except OSError as exc:
-        logger.error(
-            "[resultado_service] error_lectura_pdf estudio_id=%s resultado_id=%s path=%r err=%s",
-            estudio.id,
-            resultado.id,
-            resultado.pdf_path,
-            exc,
-        )
+    if pdf_bytes is None:
         raise ErrorDominio(
             "No se pudo leer el informe PDF del resultado. Intente nuevamente.",
             codigo="ERROR_LECTURA_PDF_RESULTADO",
             http_status=500,
             reintentable=True,
-        ) from exc
+        )
 
     logger.info(
         '[resultado_service] resultado_descargado estudio_id=%s resultado_id=%s usuario_id=%s rol="%s"',

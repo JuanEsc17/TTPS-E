@@ -15,6 +15,7 @@ from src.core.database import db
 from src.core.models import Rol, Usuario
 from src.core.repos import usuario_repo
 from src.core.services.excepciones import ErrorDominio
+from src.core.services.formato_correo import asunto_correo, formatear_correo
 from src.core.services.seguridad import (
     DUMMY_PASSWORD_HASH,
     SCOPE_ACCESO_COMPLETO,
@@ -55,12 +56,19 @@ def _serializar_usuario(usuario: Usuario) -> dict[str, Any]:
 
 def _enviar_codigo_mail(usuario: Usuario, codigo: str, email_client: EmailClient | None) -> None:
     cliente = email_client or current_app.extensions.get("email_client") or EmailClient()
-    asunto = "Codigo de verificacion por ingreso desde un equipo nuevo"
-    mensaje = (
-        f"Hola {usuario.nombre} {usuario.apellido},\n\n"
-        f"Detectamos un inicio de sesion desde una maquina nueva.\n"
-        f"Tu codigo de verificacion es: {codigo}\n"
-        "Vence en 10 minutos."
+    asunto = asunto_correo("Código de verificación por ingreso desde un equipo nuevo")
+    mensaje = formatear_correo(
+        titulo="Verificación de equipo nuevo",
+        saludo=f"Hola {usuario.nombre} {usuario.apellido},",
+        introduccion=(
+            "Detectamos un inicio de sesión desde una máquina nueva. "
+            "Ingresá el siguiente código para autorizar el acceso:"
+        ),
+        destacado=[
+            f"Código de verificación: {codigo}",
+            "Validez: 10 minutos",
+        ],
+        cierre="Si no realizaste este ingreso, ignorá este correo y cambiá tu contraseña.",
     )
     for intento in range(3):
         try:

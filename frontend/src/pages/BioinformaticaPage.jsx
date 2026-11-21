@@ -391,15 +391,22 @@ export default function BioinformaticaPage({ sesion }) {
                                                 : "border-slate-200 bg-white"
                                         }`}
                                     >
-                                        <div className="flex items-center justify-between gap-2">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
                                             <span className="text-sm font-semibold text-slate-900">
                                                 Estudio #{est.estudio_id}
                                             </span>
-                                            {est.es_pompe_urgente && (
-                                                <span className="rounded-full border border-red-200 bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
-                                                    Pompe urgente
-                                                </span>
-                                            )}
+                                            <div className="flex items-center gap-1.5">
+                                                {est.tipo_analisis === "reanalisis" && (
+                                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700">
+                                                        Reanálisis
+                                                    </span>
+                                                )}
+                                                {est.es_pompe_urgente && (
+                                                    <span className="rounded-full border border-red-200 bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
+                                                        Pompe urgente
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                         <p className="mt-1 text-xs font-medium text-slate-700">
                                             {est.patologia_nombre} · {est.tipo_analisis === "reanalisis" ? "Reanálisis" : "Inicial"}

@@ -1,4 +1,5 @@
 """Logica de negocio para el alta de pacientes (Escenarios 1 y 19)."""
+import base64
 import secrets
 from datetime import date
 from pathlib import Path
@@ -7,8 +8,9 @@ from src.clients.email_client import EmailClient
 from src.clients.exceptions import ClienteError
 from src.clients.familiograma_client import PARENTESCOS_POR_NOMBRE, FamiliogramaClient
 from src.core.repos import clinica_repo, paciente_repo, usuario_repo
-from src.core.services import clinica_service
+from src.core.services import almacenamiento_service, clinica_service
 from src.core.services.excepciones import ErrorDominio
+from src.core.services.formato_correo import asunto_correo, formatear_correo
 from src.core.services.seguridad import hashear_password
 
 _STORAGE_FAMILIOGRAMAS = Path("storage/familiogramas")
@@ -154,14 +156,22 @@ def dar_de_alta_paciente(
             resp_fam = cliente_fam.generar_familiograma(personas)
             base64_img = (resp_fam.get("imagen") or {}).get("base64")
             if base64_img:
-                destino = _STORAGE_FAMILIOGRAMAS / f"paciente_dni_{dni}.svg"
-                destino_fisico = (
-                    destino
-                    if destino.is_absolute()
-                    else Path(__file__).resolve().parents[4] / destino
-                )
-                cliente_fam.guardar_svg(base64_img, destino_fisico)
-                familiograma_path = str(destino).replace("\\", "/")
+                familiograma_rel = f"storage/familiogramas/paciente_dni_{dni}.svg"
+                if almacenamiento_service.usar_storage_remoto():
+                    almacenamiento_service.guardar_bytes(
+                        familiograma_rel,
+                        base64.b64decode(base64_img),
+                        content_type="image/svg+xml",
+                    )
+                    familiograma_path = familiograma_rel
+                elif _STORAGE_FAMILIOGRAMAS.is_absolute():
+                    destino = _STORAGE_FAMILIOGRAMAS / f"paciente_dni_{dni}.svg"
+                    cliente_fam.guardar_svg(base64_img, destino)
+                    familiograma_path = str(destino).replace("\\", "/")
+                else:
+                    destino_fisico = almacenamiento_service.resolver_ruta_local(familiograma_rel)
+                    cliente_fam.guardar_svg(base64_img, destino_fisico)
+                    familiograma_path = familiograma_rel
         except ClienteError as exc:
             raise ErrorDominio(
                 f"No se pudo generar el familiograma del paciente: {exc} | Detalle: {exc.respuesta}",
@@ -198,11 +208,33 @@ def dar_de_alta_paciente(
     )
 
     # Envia credenciales iniciales por mail (si falla la red externa no revierte el alta)
+    cuerpo_mail = formatear_correo(
+        titulo="Bienvenido/a al portal de pacientes",
+        saludo=f"Hola {datos['nombre']} {datos['apellido']},",
+        introduccion=(
+            "Tu médico tratante registró tu cuenta en el Sistema de Seguimiento "
+            "de Estudios de Exoma Clínico."
+        ),
+        destacado=[
+            f"Usuario: {email}",
+            f"Contraseña temporal: {password_temporal}",
+        ],
+        secciones=[
+            (
+                "Próximos pasos",
+                [
+                    "Ingresá al portal utilizando tu correo electrónico y la contraseña temporal.",
+                    "En tu primer inicio de sesión deberás establecer una contraseña personal.",
+                ],
+            )
+        ],
+        cierre="Ante cualquier consulta, comunicate con tu médico tratante.",
+    )
     try:
         cliente_mail = email_client or EmailClient(timeout=5.0)
         cliente_mail.enviar_aviso(
-            asunto="Alta de paciente - Credenciales iniciales",
-            mensaje=mensaje_aviso,
+            asunto=asunto_correo("Alta de paciente · Credenciales iniciales"),
+            mensaje=cuerpo_mail,
             destinatarios=[email],
             referencia=f"paciente-{paciente.id}",
         )

@@ -173,3 +173,53 @@ def sincronizar_genes_patologia(patologia_id: int, genes_info: list[dict[str, ob
         db.session.add(PatologiaGen(patologia_id=patologia_id, gen_id=gen.id))
     db.session.commit()
     return genes_asociados
+
+
+def buscar_genes_por_ids(genes_ids: list[int]) -> list[Gen]:
+    """Obtiene genes por sus IDs."""
+    if not genes_ids:
+        return []
+    stmt = select(Gen).where(Gen.id.in_(genes_ids))
+    return list(db.session.scalars(stmt).all())
+
+
+def buscar_genes_por_simbolos(simbolos: list[str]) -> list[Gen]:
+    """Busca genes por simbolo (comparacion insensible a mayusculas)."""
+    limpios = [s.strip().upper() for s in simbolos if s and s.strip()]
+    if not limpios:
+        return []
+    stmt = select(Gen).where(func.upper(Gen.simbolo).in_(limpios))
+    return list(db.session.scalars(stmt).all())
+
+
+def crear_gen(
+    *,
+    simbolo: str,
+    nombre: str | None = None,
+    es_hallazgo_secundario: bool = False,
+) -> Gen:
+    """Inserta un nuevo Gen validado en la sesion actual sin hacer commit."""
+    gen = Gen(
+        simbolo=simbolo.strip().upper(),
+        nombre=nombre.strip()[:255] if isinstance(nombre, str) and nombre.strip() else None,
+        es_hallazgo_secundario=es_hallazgo_secundario,
+    )
+    db.session.add(gen)
+    db.session.flush()
+    return gen
+
+
+def listar_genes_locales(q: str | None = None, *, limite: int = 30) -> list[Gen]:
+    """Lista genes cacheados localmente con filtro opcional por simbolo o nombre."""
+    stmt = select(Gen)
+    if q and q.strip():
+        texto = q.strip()
+        stmt = stmt.where(
+            or_(
+                Gen.simbolo.ilike(f"{texto}%"),
+                Gen.simbolo.ilike(f"%{texto}%"),
+                Gen.nombre.ilike(f"%{texto}%"),
+            )
+        )
+    stmt = stmt.order_by(Gen.simbolo.asc()).limit(limite)
+    return list(db.session.scalars(stmt).all())
