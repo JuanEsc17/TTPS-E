@@ -34,7 +34,7 @@ from src.core.models import (
     calcular_conclusion_diagnostica,
 )
 from src.core.repos import bioinformatica_repo
-from src.core.services import auditoria_service
+from src.core.services import almacenamiento_service, auditoria_service
 from src.core.services.excepciones import ErrorDominio
 from src.core.services.formato_correo import asunto_correo, formatear_correo
 from src.core.services.pdf_resultado import construir_pdf_resultado
@@ -53,22 +53,7 @@ def ahora_utc_naive() -> datetime:
 
 def resolver_ruta_storage(ruta_relativa: str) -> Path:
     """Resuelve una ruta logica 'storage/...' dentro del directorio de almacenamiento configurado."""
-    if has_app_context() and current_app.config.get("STORAGE_DIR"):
-        base_dir = Path(str(current_app.config["STORAGE_DIR"])).resolve()
-    else:
-        base_dir = (Path(__file__).resolve().parents[3] / "storage").resolve()
-
-    limpia = ruta_relativa.replace("\\", "/").lstrip("/")
-    limpia = limpia.removeprefix("storage/")
-
-    ruta_fisica = (base_dir / limpia).resolve()
-    if not ruta_fisica.is_relative_to(base_dir):
-        raise ErrorDominio(
-            "Ruta de archivo fuera del directorio permitido.",
-            codigo="RUTA_ARCHIVO_INVALIDA",
-            http_status=400,
-        )
-    return ruta_fisica
+    return almacenamiento_service.resolver_ruta_local(ruta_relativa)
 
 
 def resolver_email_client(
@@ -149,8 +134,10 @@ def _generar_pdf_resultado(
     ruta_fisica: Path,
     resultado_id: int | None = None,
     pdf_path_log: str | None = None,
+    ruta_logica: str | None = None,
 ) -> None:
     """Compila el informe clinico del estudio en PDF vectorial usando fpdf2."""
+    destino_logico = ruta_logica or pdf_path_log
     try:
         ruta_fisica.parent.mkdir(parents=True, exist_ok=True)
         pdf = construir_pdf_resultado(
@@ -165,11 +152,20 @@ def _generar_pdf_resultado(
         ruta_tmp = ruta_fisica.with_name(f".{ruta_fisica.name}.{os.getpid()}.{time.time_ns()}.tmp")
         try:
             pdf.output(str(ruta_tmp))
-            os.replace(ruta_tmp, ruta_fisica)
+            if destino_logico and almacenamiento_service.usar_storage_remoto():
+                almacenamiento_service.guardar_bytes(
+                    destino_logico,
+                    ruta_tmp.read_bytes(),
+                    content_type="application/pdf",
+                )
+            else:
+                os.replace(ruta_tmp, ruta_fisica)
         finally:
             ruta_tmp.unlink(missing_ok=True)
     except Exception as exc:
         ruta_fisica.unlink(missing_ok=True)
+        if destino_logico and almacenamiento_service.usar_storage_remoto():
+            almacenamiento_service.eliminar_archivo(destino_logico)
         logger.error(
             "[resultado_service] abort_cleanup_pdf estudio_id=%s analisis_id=%s resultado_id=%s path=%r err=%s",
             estudio.id,
@@ -211,6 +207,7 @@ def preparar_resultado_en_transaccion(
         fecha_proximo_estudio=fecha_proximo_estudio,
         generado_en=ahora,
         ruta_fisica=ruta_fisica,
+        ruta_logica=pdf_path_rel,
     )
 
     logger.info(
@@ -302,7 +299,7 @@ def preparar_resultado_en_transaccion(
             if email:
                 emails_unicos.append(email)
     except Exception:
-        ruta_fisica.unlink(missing_ok=True)
+        almacenamiento_service.eliminar_archivo(pdf_path_rel)
         raise
 
     logger.info(
@@ -769,7 +766,24 @@ def descargar_pdf_resultado(
     )
 
     ruta_fisica = resolver_ruta_storage(resultado.pdf_path)
-    if not ruta_fisica.is_file():
+    try:
+        pdf_bytes = almacenamiento_service.leer_bytes(resultado.pdf_path)
+    except (OSError, ClienteError) as exc:
+        logger.error(
+            "[resultado_service] error_lectura_pdf estudio_id=%s resultado_id=%s path=%r err=%s",
+            estudio.id,
+            resultado.id,
+            resultado.pdf_path,
+            exc,
+        )
+        raise ErrorDominio(
+            "No se pudo leer el informe PDF del resultado. Intente nuevamente.",
+            codigo="ERROR_LECTURA_PDF_RESULTADO",
+            http_status=500,
+            reintentable=True,
+        ) from exc
+
+    if pdf_bytes is None:
         logger.warning(
             "[resultado_service] pdf_faltante_regenerando estudio_id=%s analisis_id=%s path=%r",
             estudio.id,
@@ -790,24 +804,32 @@ def descargar_pdf_resultado(
             ruta_fisica=ruta_fisica,
             resultado_id=resultado.id,
             pdf_path_log=resultado.pdf_path,
+            ruta_logica=resultado.pdf_path,
         )
+        try:
+            pdf_bytes = almacenamiento_service.leer_bytes(resultado.pdf_path)
+        except (OSError, ClienteError) as exc:
+            logger.error(
+                "[resultado_service] error_lectura_pdf estudio_id=%s resultado_id=%s path=%r err=%s",
+                estudio.id,
+                resultado.id,
+                resultado.pdf_path,
+                exc,
+            )
+            raise ErrorDominio(
+                "No se pudo leer el informe PDF del resultado. Intente nuevamente.",
+                codigo="ERROR_LECTURA_PDF_RESULTADO",
+                http_status=500,
+                reintentable=True,
+            ) from exc
 
-    try:
-        pdf_bytes = ruta_fisica.read_bytes()
-    except OSError as exc:
-        logger.error(
-            "[resultado_service] error_lectura_pdf estudio_id=%s resultado_id=%s path=%r err=%s",
-            estudio.id,
-            resultado.id,
-            resultado.pdf_path,
-            exc,
-        )
+    if pdf_bytes is None:
         raise ErrorDominio(
             "No se pudo leer el informe PDF del resultado. Intente nuevamente.",
             codigo="ERROR_LECTURA_PDF_RESULTADO",
             http_status=500,
             reintentable=True,
-        ) from exc
+        )
 
     logger.info(
         '[resultado_service] resultado_descargado estudio_id=%s resultado_id=%s usuario_id=%s rol="%s"',

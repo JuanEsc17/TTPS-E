@@ -5,7 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from flask import Flask
 
-from .core.database import db
+from .core.database import construir_config_engine, create_tables, db
 from .web.api.turnos import turnos_bp
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -20,6 +20,7 @@ from .web.api.muestras import muestras_bp
 from .web.api.pacientes import pacientes_bp
 from .web.api.patologias import patologias_bp
 from .web.api.resultados import resultados_bp
+from .web.api.salud import salud_bp
 from .web.api.snomed import snomed_bp
 from .web.handlers.errors import registrar_manejadores_errores
 
@@ -58,7 +59,7 @@ def create_app(config: dict | None = None) -> Flask:
         "DATABASE_URL",
         "sqlite:///:memory:"  # SQLite en memoria por defecto para desarrollo/tests rapidos
     )
-    app.config["SQLALCHEMY_ENGINES"] = {"default": database_url}
+    app.config["SQLALCHEMY_ENGINES"] = {"default": construir_config_engine(database_url)}
     app.config["TESTING"] = False
     app.config["SECRET_KEY"] = os.environ.get(
         "SECRET_KEY",
@@ -69,7 +70,7 @@ def create_app(config: dict | None = None) -> Flask:
         # Si pasan SQLALCHEMY_DATABASE_URI o database_url por config, adaptarlo a SQLALCHEMY_ENGINES
         if "SQLALCHEMY_DATABASE_URI" in config:
             uri = config.pop("SQLALCHEMY_DATABASE_URI")
-            app.config["SQLALCHEMY_ENGINES"] = {"default": uri}
+            app.config["SQLALCHEMY_ENGINES"] = {"default": construir_config_engine(uri)}
         app.config.update(config)
 
     # Inicializar extensiones
@@ -89,6 +90,13 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(chatbot_bp)
     app.register_blueprint(bioinformatica_bp)
     app.register_blueprint(resultados_bp)
+    app.register_blueprint(salud_bp)
+
+    @app.cli.command("init-db")
+    def init_db_cli() -> None:
+        """Crea las tablas faltantes en la base de datos configurada de forma idempotente."""
+        create_tables()
+        print("Tablas verificadas/creadas correctamente.")
 
     @app.cli.command("procesar-ausencias")
     def procesar_ausencias_cli() -> None:

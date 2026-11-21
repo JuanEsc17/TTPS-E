@@ -34,7 +34,11 @@ from src.core.models import (
     Variante,
 )
 from src.core.repos import bioinformatica_repo, clinica_repo, usuario_repo
-from src.core.services import auditoria_service, resultado_service
+from src.core.services import (
+    almacenamiento_service,
+    auditoria_service,
+    resultado_service,
+)
 from src.core.services.excepciones import ErrorDominio
 from src.core.services.formato_correo import asunto_correo, formatear_correo
 
@@ -243,13 +247,16 @@ def cargar_datos_crudos(
         )
 
     archivo_path_rel = f"storage/datos_crudos/estudio_{estudio.id}.txt"
-    ruta_fisica = resultado_service.resolver_ruta_storage(archivo_path_rel)
+    resultado_service.resolver_ruta_storage(archivo_path_rel)
 
     try:
-        ruta_fisica.parent.mkdir(parents=True, exist_ok=True)
-        ruta_fisica.write_text(secuencia_normalizada, encoding="utf-8")
-    except OSError as exc:
-        ruta_fisica.unlink(missing_ok=True)
+        almacenamiento_service.guardar_bytes(
+            archivo_path_rel,
+            secuencia_normalizada.encode("utf-8"),
+            content_type="text/plain; charset=utf-8",
+        )
+    except (OSError, ClienteError) as exc:
+        almacenamiento_service.eliminar_archivo(archivo_path_rel)
         raise ErrorDominio(
             "No se pudo guardar el archivo de datos crudos en el almacenamiento.",
             codigo="ERROR_ESCRITURA_DATOS_CRUDOS",
@@ -317,7 +324,7 @@ def cargar_datos_crudos(
         bioinformatica_repo.guardar_cambios()
     except IntegrityError as exc:
         bioinformatica_repo.deshacer_cambios()
-        ruta_fisica.unlink(missing_ok=True)
+        almacenamiento_service.eliminar_archivo(archivo_path_rel)
         raise ErrorDominio(
             "Los datos crudos de este estudio ya fueron cargados.",
             codigo="DATOS_CRUDOS_YA_CARGADOS",
@@ -325,7 +332,7 @@ def cargar_datos_crudos(
         ) from exc
     except SQLAlchemyError as exc:
         bioinformatica_repo.deshacer_cambios()
-        ruta_fisica.unlink(missing_ok=True)
+        almacenamiento_service.eliminar_archivo(archivo_path_rel)
         raise ErrorDominio(
             "Error al persistir los datos crudos del estudio. Intente nuevamente.",
             codigo="DB_ERROR",
@@ -445,8 +452,8 @@ def obtener_datos_crudos_estudio(estudio_id: int, usuario_id: int) -> dict[str, 
             http_status=404,
         )
 
-    ruta_fisica = resultado_service.resolver_ruta_storage(estudio.datos_crudos.archivo_path)
-    contenido = ruta_fisica.read_text(encoding="utf-8") if ruta_fisica.is_file() else ""
+    datos_bytes = almacenamiento_service.leer_bytes(estudio.datos_crudos.archivo_path)
+    contenido = datos_bytes.decode("utf-8") if datos_bytes is not None else ""
     bases_count = sum(
         len(line.strip())
         for line in contenido.splitlines()
@@ -945,6 +952,7 @@ def registrar_variantes_analisis(
     variantes_ordenadas = [variantes_por_id[vid] for vid in ids_unicos]
 
     ruta_pdf_creada = None
+    pdf_path_creado: str | None = None
     try:
         bioinformatica_repo.agregar_variantes_analisis(activo.id, ids_unicos)
         resultado, ruta_pdf_creada, avisos_mail, contexto_mail = (
@@ -956,15 +964,20 @@ def registrar_variantes_analisis(
                 ip_origen=ip_origen,
             )
         )
+        pdf_path_creado = resultado.pdf_path
         bioinformatica_repo.guardar_cambios()
     except ErrorDominio:
         bioinformatica_repo.deshacer_cambios()
-        if ruta_pdf_creada is not None:
+        if pdf_path_creado is not None:
+            almacenamiento_service.eliminar_archivo(pdf_path_creado)
+        elif ruta_pdf_creada is not None:
             ruta_pdf_creada.unlink(missing_ok=True)
         raise
     except IntegrityError as exc:
         bioinformatica_repo.deshacer_cambios()
-        if ruta_pdf_creada is not None:
+        if pdf_path_creado is not None:
+            almacenamiento_service.eliminar_archivo(pdf_path_creado)
+        elif ruta_pdf_creada is not None:
             ruta_pdf_creada.unlink(missing_ok=True)
         raise ErrorDominio(
             "El analisis ya posee un resultado registrado.",
@@ -973,7 +986,9 @@ def registrar_variantes_analisis(
         ) from exc
     except SQLAlchemyError as exc:
         bioinformatica_repo.deshacer_cambios()
-        if ruta_pdf_creada is not None:
+        if pdf_path_creado is not None:
+            almacenamiento_service.eliminar_archivo(pdf_path_creado)
+        elif ruta_pdf_creada is not None:
             ruta_pdf_creada.unlink(missing_ok=True)
         raise ErrorDominio(
             "Error al registrar las variantes y resultado del analisis.",

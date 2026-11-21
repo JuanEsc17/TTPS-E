@@ -1,6 +1,7 @@
 """Capa de Clientes HTTP para integraciones con APIs externas (TTPS-E)."""
 from dotenv import load_dotenv
 
+from .almacenamiento_client import SupabaseStorageClient
 from .apigen_client import ApigenClient, BioinformaticaClient
 from .cdss_client import CDSSClient, CdssClient
 from .chatbot_client import ChatbotClient
@@ -47,4 +48,5 @@ __all__ = [
     "ObrasSocialesClient",
     "OptimizacionClient",
     "SnomedClient",
+    "SupabaseStorageClient",
 ]
