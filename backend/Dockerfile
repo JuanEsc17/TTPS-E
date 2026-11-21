@@ -13,15 +13,15 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock ./
+COPY pyproject.toml poetry.lock README.md ./
 RUN poetry install --only main --no-root --no-ansi
 
 COPY app ./app
 COPY main.py ./
 COPY scripts ./scripts
 
-RUN poetry install --only main --no-ansi \
-    && adduser --disabled-password --gecos "" appuser \
+RUN poetry install --only main --no-ansi
+RUN useradd --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /app/app/storage /app/storage \
     && chown -R appuser:appuser /app
 
