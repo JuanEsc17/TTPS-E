@@ -18,6 +18,7 @@ import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
 import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
+import AltaGerenteMedicoPage from "./pages/AltaGerenteMedicoPage";
 
 const RUTAS_INICIO = [
   { path: "/admin/dashboard", titulo: "Administración general" },
@@ -110,9 +111,14 @@ export default function App() {
             path="/transporte/orden-del-dia"
             element={<OrdenDelDiaPage sesion={sesion} />}
           />
+          <Route
+            path="/admin/gerentes-medicos/nuevo"
+            element={<AltaGerenteMedicoPage sesion={sesion} />}
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />
+
       </Routes>
     </BrowserRouter>
   );

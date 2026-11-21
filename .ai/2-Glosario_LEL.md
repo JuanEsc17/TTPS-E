@@ -9,10 +9,11 @@
 **Impacto:**
 
 * El **admin general** da de alta a los **gerentes médicos**.
+* El **admin general** da de alta a los **administrativos**.
 
 ## **Sujeto: Administrativo**
 
-**Noción:** Persona del **laboratorio central** que se da de alta por sí misma con nombre, apellido, teléfono y mail, y gestiona los trámites del **estudio**.
+**Noción:** Persona del **laboratorio central** a la que el **admin general** da de alta con nombre, apellido, teléfono y mail, y que gestiona los trámites del **estudio**.
 
 **Impacto:**
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 from sqlalchemy import delete, select
-from src import create_app
 from src.core.database import create_tables, db
 from src.core.models import (
     CodigoVerificacion,
@@ -16,6 +15,8 @@ from src.core.models import (
     Usuario,
 )
 from src.core.services.seguridad import hashear_password, sha256_hex
+
+from src import create_app
 
 PASSWORD_PRUEBA = "Clave1234"
 

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-
+from src.core.models import Especialidad 
 from sqlalchemy import select
 from src import create_app
 from src.core.database import create_tables, db
@@ -16,6 +16,8 @@ from src.core.models import (
     Usuario,
 )
 from src.core.services.seguridad import hashear_password, sha256_hex
+
+ESPECIALIDAD_BASE = "Genética Médica"
 
 PASSWORD_PRUEBA = "Clave1234"
 DISPOSITIVOS_POR_DEFECTO = ("pc-lab", "pc-oficina")
@@ -239,10 +241,23 @@ def cargar_usuarios_por_rol() -> list[dict]:
             dni="40111222",
         )
 
+        especialidad = _obtener_o_crear_especialidad()
+        for medico in medicos_por_email.values():
+            if especialidad not in medico.especialidades:
+                medico.especialidades.append(especialidad)
+
         db.session.commit()
 
     return resumen
-
+def _obtener_o_crear_especialidad(nombre: str = ESPECIALIDAD_BASE) -> Especialidad:
+    especialidad = db.session.scalar(
+        select(Especialidad).where(Especialidad.nombre == nombre)
+    )
+    if especialidad is None:
+        especialidad = Especialidad(nombre=nombre)
+        db.session.add(especialidad)
+        db.session.flush()
+    return especialidad
 
 if __name__ == "__main__":
     filas = cargar_usuarios_por_rol()

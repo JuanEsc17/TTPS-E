@@ -374,18 +374,18 @@ Basado en la entrevista proporcionada para el ejercicio de TTPS.
 
 ## **Escenario 22: Registrar un administrativo**
 
-**Objetivo:** Permitir que un administrativo se registre como usuario del sistema.
+**Objetivo:** Dar de alta a un administrativo como usuario del sistema.
 
-**Contexto:** El profesional administrativo necesita utilizar el sistema.
+**Contexto:** El laboratorio necesita incorporar personal administrativo que utilice el sistema.
 
-**Actores:** Administrativo.
+**Actores:** Admin general.
 
-**Recursos:** Nombre, apellido, teléfono, correo electrónico.
+**Recursos:** Nombre, apellido, teléfono, correo electrónico, contraseña.
 
 **Episodios:**
 
-1. El administrativo ingresa sus datos personales.  
-2. El administrativo registra sus datos de contacto.  
+1. El admin general ingresa los datos personales del administrativo.  
+2. El admin general registra sus datos de contacto y su contraseña.  
 3. El sistema registra al administrativo.
 
 ## **Escenario 23: Gestionar una patología**

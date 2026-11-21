@@ -23,7 +23,7 @@ from .web.api.resultados import resultados_bp
 from .web.api.salud import salud_bp
 from .web.api.snomed import snomed_bp
 from .web.handlers.errors import registrar_manejadores_errores
-
+from .web.api.admin_usuarios import admin_usuarios_bp  
 
 def _cargar_entorno(ruta_env: Path | None = None) -> None:
     """Carga variables desde `.env` sin sobrescribir las ya definidas en el entorno."""
@@ -109,5 +109,6 @@ def create_app(config: dict | None = None) -> Flask:
             f"Procesados: {resumen['total_procesados']} | "
             f"Errores: {len(resumen['errores'])}"
         )
-
+    app.register_blueprint(admin_usuarios_bp)   
+    
     return app
