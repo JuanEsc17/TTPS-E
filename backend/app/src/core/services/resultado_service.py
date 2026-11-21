@@ -1,8 +1,9 @@
-"""Servicio para generacion, notificacion, consulta y descarga de resultados de exoma (Escenario 16)."""
+"""Servicio para generacion, notificacion, consulta y descarga de resultados de exoma (Escenarios 16 y 37)."""
 from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ from src.core.services.excepciones import ErrorDominio
 
 logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
+_PATRON_ESTUDIO_AVISO = re.compile(r"estudio #(\d+)(?!\d)", re.IGNORECASE)
 _ROLES_PERMITIDOS_RESULTADO = frozenset(
     {Rol.PACIENTE, Rol.MEDICO, Rol.GERENTE_MEDICO, Rol.BIOINFORMATICO}
 )
@@ -148,6 +150,8 @@ def _generar_pdf_resultado(
     fecha_proximo_estudio: Any,
     generado_en: datetime,
     ruta_fisica: Path,
+    resultado_id: int | None = None,
+    pdf_path_log: str | None = None,
 ) -> None:
     """Compila el informe clinico del estudio en PDF usando fpdf2."""
     try:
@@ -294,6 +298,14 @@ def _generar_pdf_resultado(
             ruta_tmp.unlink(missing_ok=True)
     except Exception as exc:
         ruta_fisica.unlink(missing_ok=True)
+        logger.error(
+            "[resultado_service] abort_cleanup_pdf estudio_id=%s analisis_id=%s resultado_id=%s path=%r err=%s",
+            estudio.id,
+            analisis.id,
+            resultado_id,
+            pdf_path_log or str(ruta_fisica),
+            exc,
+        )
         raise ErrorDominio(
             "No se pudo generar el informe PDF del resultado. Intente nuevamente.",
             codigo="ERROR_GENERACION_PDF_RESULTADO",
@@ -585,6 +597,16 @@ def _serializar_resultado_analisis(
             {
                 "variante_id": v.id,
                 "gen_simbolo": v.gen.simbolo if v.gen else "",
+                "gen": (
+                    {
+                        "id": v.gen.id,
+                        "simbolo": v.gen.simbolo,
+                        "nombre": v.gen.nombre,
+                        "es_hallazgo_secundario": bool(v.gen.es_hallazgo_secundario),
+                    }
+                    if v.gen is not None
+                    else None
+                ),
                 "notacion": v.notacion,
                 "clinvar_id": v.clinvar_id,
                 "clasificacion": v.clasificacion.value,
@@ -657,16 +679,31 @@ def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
 
 
 def consultar_resultado_estudio(*, estudio_id: int, usuario: Usuario) -> dict[str, Any]:
-    """STEP 4: Devuelve el detalle del resultado actual y el historial de resultados del estudio."""
+    """Devuelve el detalle del resultado actual, su historial y marca los avisos como leidos."""
     estudio, analisis_actual, resultado_actual, completados = (
         _obtener_estudio_y_resultado_autorizado(estudio_id=estudio_id, usuario=usuario)
     )
+    # Al abrir el resultado (Escenario 37 STEP 2), los avisos del usuario sobre este estudio pasan a leidos.
+    # Si se agrega acceso delegado por vinculo familiar (Escenario 41), omitir este paso en ese modo.
+    try:
+        if bioinformatica_repo.marcar_avisos_estudio_leidos(usuario.id, estudio.id) > 0:
+            bioinformatica_repo.guardar_cambios()
+    except SQLAlchemyError as exc:
+        bioinformatica_repo.deshacer_cambios()
+        logger.warning(
+            "[resultado_service] error_marcar_avisos_leidos estudio_id=%s usuario_id=%s err=%s",
+            estudio.id,
+            usuario.id,
+            exc,
+        )
+
     logger.info(
-        '[resultado_service] resultado_consultado estudio_id=%s resultado_id=%s usuario_id=%s rol="%s"',
+        '[resultado_service] step=2_consulta_resultado estudio_id=%s resultado_id=%s usuario_id=%s rol="%s" positivo=%s',
         estudio.id,
         resultado_actual.id,
         usuario.id,
         usuario.rol.value,
+        bool(resultado_actual.positivo),
     )
     return {
         "estudio_id": estudio.id,
@@ -676,10 +713,62 @@ def consultar_resultado_estudio(*, estudio_id: int, usuario: Usuario) -> dict[st
             if estudio.fecha_reevaluacion_vus
             else None
         ),
+        "patologia_sospechada": (
+            {
+                "id": estudio.patologia_sospechada.id,
+                "nombre": estudio.patologia_sospechada.nombre,
+            }
+            if estudio.patologia_sospechada is not None
+            else None
+        ),
         "resultado_actual": _serializar_resultado_analisis(estudio.id, analisis_actual),
         "historial_resultados": [
             _serializar_resultado_analisis(estudio.id, a, con_query_analisis=True)
             for a in completados
+        ],
+    }
+
+
+def _extraer_estudio_id_aviso(mensaje: str) -> int | None:
+    match = _PATRON_ESTUDIO_AVISO.search(mensaje or "")
+    return int(match.group(1)) if match else None
+
+
+def listar_avisos_usuario(
+    *,
+    usuario: Usuario,
+    solo_no_leidos: bool = False,
+    limite: int = 50,
+) -> dict[str, Any]:
+    """Lista los avisos en aplicacion (CanalAviso.APP) del usuario autenticado."""
+    if limite <= 0 or limite > 100:
+        raise ErrorDominio(
+            "El parametro limite debe ser un entero entre 1 y 100.",
+            codigo="DATOS_INVALIDOS",
+            http_status=400,
+        )
+
+    avisos = bioinformatica_repo.listar_avisos_usuario(
+        usuario.id,
+        canal=CanalAviso.APP,
+        solo_no_leidos=solo_no_leidos,
+        limite=limite,
+    )
+    no_leidos = bioinformatica_repo.contar_avisos_no_leidos(usuario.id, canal=CanalAviso.APP)
+    return {
+        "no_leidos": no_leidos,
+        "avisos": [
+            {
+                "id": a.id,
+                "mensaje": a.mensaje,
+                "leido": bool(a.leido),
+                "canal": a.canal.value,
+                "enviado": bool(a.enviado),
+                "enviado_en": a.enviado_en.isoformat() if a.enviado_en else None,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "estudio_id": _extraer_estudio_id_aviso(a.mensaje),
+            }
+            for a in avisos
         ],
     }
 
@@ -717,6 +806,8 @@ def descargar_pdf_resultado(
             fecha_proximo_estudio=resultado.fecha_proximo_estudio,
             generado_en=resultado.generado_en or ahora_utc_naive(),
             ruta_fisica=ruta_fisica,
+            resultado_id=resultado.id,
+            pdf_path_log=resultado.pdf_path,
         )
 
     try:

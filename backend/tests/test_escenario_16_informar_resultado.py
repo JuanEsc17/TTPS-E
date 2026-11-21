@@ -572,6 +572,12 @@ def test_tc04_consulta_json_y_descarga_pdf_paciente_titular(
     assert actual["variantes"][0] == {
         "variante_id": datos_escenario_16["v_pat"].id,
         "gen_simbolo": "GAA",
+        "gen": {
+            "id": datos_escenario_16["gen_gaa"].id,
+            "simbolo": "GAA",
+            "nombre": "Alpha glucosidase",
+            "es_hallazgo_secundario": False,
+        },
         "notacion": "c.1935C>A",
         "clinvar_id": "VCV000004025",
         "clasificacion": "patogenica",

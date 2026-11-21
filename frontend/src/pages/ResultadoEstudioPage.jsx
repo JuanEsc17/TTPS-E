@@ -88,7 +88,7 @@ export default function ResultadoEstudioPage({ sesion }) {
     const rol = sesion?.usuario?.rol;
 
     const [recargaId, setRecargaId] = useState(0);
-    const claveActual = `${estudioId}:${recargaId}`;
+    const claveActual = `${token || ""}:${estudioId}:${recargaId}`;
     const [estadoCarga, setEstadoCarga] = useState({
         clave: null,
         datos: null,
@@ -96,7 +96,9 @@ export default function ResultadoEstudioPage({ sesion }) {
     });
     const [analisisSeleccionadoId, setAnalisisSeleccionadoId] = useState(null);
     const [descargandoAnalisisId, setDescargandoAnalisisId] = useState(null);
+    const [ultimaDescargaAnalisisId, setUltimaDescargaAnalisisId] = useState(null);
     const [errorDescarga, setErrorDescarga] = useState("");
+    const [avisoDescargaOk, setAvisoDescargaOk] = useState("");
 
     useEffect(() => {
         if (!token || !estudioId) return;
@@ -111,6 +113,8 @@ export default function ResultadoEstudioPage({ sesion }) {
                 if (controller.signal.aborted) return;
                 setEstadoCarga({ clave: claveActual, datos, error: null });
                 setAnalisisSeleccionadoId(null);
+                // El backend marca los avisos de este estudio como leidos; refrescamos la campana
+                window.dispatchEvent(new Event("avisos:actualizar"));
             })
             .catch((err) => {
                 if (err?.name === "AbortError" || controller.signal.aborted) return;
@@ -145,13 +149,16 @@ export default function ResultadoEstudioPage({ sesion }) {
         if (!token || !estudioId) return;
         const claveDescarga = analisisIdOpcional ?? "actual";
         setDescargandoAnalisisId(claveDescarga);
+        setUltimaDescargaAnalisisId(analisisIdOpcional);
         setErrorDescarga("");
+        setAvisoDescargaOk("");
         try {
-            await descargarResultadoPdfRequest({
+            const nombreArchivo = await descargarResultadoPdfRequest({
                 token,
                 estudioId,
                 analisisId: analisisIdOpcional,
             });
+            setAvisoDescargaOk(`Archivo descargado: ${nombreArchivo}`);
         } catch (err) {
             setErrorDescarga(err.message || "No se pudo descargar el PDF del resultado.");
         } finally {
@@ -176,6 +183,9 @@ export default function ResultadoEstudioPage({ sesion }) {
                     </Link>
                     <p className="mt-2 text-[11px] font-semibold uppercase tracking-wider text-[#0B4F8A]">
                         Informe genómico · Estudio #{estudioId}
+                        {datos?.patologia_sospechada?.nombre && (
+                            <span> · {datos.patologia_sospechada.nombre}</span>
+                        )}
                     </p>
                     <h1 className="font-titulo mt-0.5 text-2xl font-semibold text-slate-900 sm:text-3xl">
                         Resultado del estudio de exoma
@@ -216,19 +226,45 @@ export default function ResultadoEstudioPage({ sesion }) {
                 )}
             </div>
 
+            {avisoDescargaOk && (
+                <div
+                    role="status"
+                    aria-live="polite"
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800"
+                >
+                    <span>{avisoDescargaOk}</span>
+                    <button
+                        type="button"
+                        onClick={() => setAvisoDescargaOk("")}
+                        className="font-semibold underline"
+                    >
+                        Cerrar
+                    </button>
+                </div>
+            )}
+
             {errorDescarga && (
                 <div
                     role="alert"
                     className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-medium text-red-700"
                 >
                     <span>{errorDescarga}</span>
-                    <button
-                        type="button"
-                        onClick={() => setErrorDescarga("")}
-                        className="font-semibold underline"
-                    >
-                        Cerrar
-                    </button>
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => handleDescargarPdf(ultimaDescargaAnalisisId)}
+                            className="font-semibold underline"
+                        >
+                            Reintentar
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setErrorDescarga("")}
+                            className="font-semibold underline"
+                        >
+                            Cerrar
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -422,9 +458,21 @@ export default function ResultadoEstudioPage({ sesion }) {
                                                 return (
                                                     <tr key={v.variante_id} className="hover:bg-slate-50/70">
                                                         <td className="px-4 py-3">
-                                                            <span className="rounded-md bg-[#EAF2FA] px-2 py-0.5 font-mono font-semibold text-[#0B4F8A]">
-                                                                {v.gen_simbolo || "—"}
-                                                            </span>
+                                                            <div className="flex flex-wrap items-center gap-1.5">
+                                                                <span className="rounded-md bg-[#EAF2FA] px-2 py-0.5 font-mono font-semibold text-[#0B4F8A]">
+                                                                    {v.gen?.simbolo || v.gen_simbolo || "—"}
+                                                                </span>
+                                                                {v.gen?.es_hallazgo_secundario && (
+                                                                    <span className="rounded-full border border-cyan-200 bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold text-[#0B4F8A]">
+                                                                        Hallazgo secundario
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                            {v.gen?.nombre && (
+                                                                <p className="mt-0.5 text-[11px] text-slate-500">
+                                                                    {v.gen.nombre}
+                                                                </p>
+                                                            )}
                                                         </td>
                                                         <td className="px-4 py-3 font-mono font-semibold text-slate-900">
                                                             {v.notacion}

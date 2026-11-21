@@ -59,6 +59,33 @@ function extraerNombreArchivo(contentDisposition, fallback) {
     return match?.[1]?.trim() || fallback;
 }
 
+export async function listarAvisosRequest(
+    token,
+    { soloNoLeidos = false, limite = 20, signal } = {}
+) {
+    const params = new URLSearchParams();
+    if (soloNoLeidos) params.set("solo_no_leidos", "true");
+    if (limite) params.set("limite", String(limite));
+    const qs = params.toString() ? `?${params.toString()}` : "";
+
+    const resp = await fetchConTimeout(`/api/avisos${qs}`, { token, signal });
+    if (!resp.ok) {
+        throw await parsearError(resp, "No se pudieron cargar los avisos.");
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!data.ok) {
+        const err = new Error(data.error || "No se pudieron cargar los avisos.");
+        err.code = data.code;
+        err.status = resp.status;
+        err.retryable = Boolean(data.retryable);
+        throw err;
+    }
+    return {
+        no_leidos: Number(data.no_leidos) || 0,
+        avisos: Array.isArray(data.avisos) ? data.avisos : [],
+    };
+}
+
 export async function listarMisEstudiosResultadosRequest(token, { signal } = {}) {
     const resp = await fetchConTimeout("/api/estudios/mis-estudios", { token, signal });
     if (!resp.ok) {

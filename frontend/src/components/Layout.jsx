@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
+import CampanaAvisos from "./CampanaAvisos";
 import FondoAdn from "./FondoAdn";
 import LogoAdn from "./LogoAdn";
 
@@ -166,7 +167,7 @@ export default function Layout({ sesion, onCerrarSesion }) {
             )}
 
             <div className="flex min-w-0 flex-1 flex-col">
-                <header className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-8">
+                <header className="relative z-20 mx-auto w-full max-w-6xl px-4 pt-4 sm:px-8">
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-xs backdrop-blur-md">
                         <div className="flex items-center gap-3">
                             <button
@@ -193,6 +194,7 @@ export default function Layout({ sesion, onCerrarSesion }) {
                         </div>
 
                         <div className="flex items-center gap-3">
+                            <CampanaAvisos sesion={sesion} />
                             <div className="text-right leading-tight">
                                 <span className="block text-xs font-semibold text-slate-800">
                                     {usuario?.nombre} {usuario?.apellido}

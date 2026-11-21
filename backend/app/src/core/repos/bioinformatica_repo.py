@@ -1,6 +1,7 @@
 """Repositorio de acceso a datos para datos crudos, analisis bioinformatico, variantes y resultados."""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Any
 
@@ -307,6 +308,52 @@ def marcar_avisos_enviados(avisos: list[Aviso], enviado_en: datetime) -> None:
     for aviso in avisos:
         aviso.enviado = True
         aviso.enviado_en = enviado_en
+
+
+def marcar_avisos_estudio_leidos(usuario_id: int, estudio_id: int) -> int:
+    """Marca como leidos los avisos no leidos del usuario referidos al estudio."""
+    # shortcut: Aviso no tiene FK estudio_id; filtra por token 'estudio #<id>' en mensaje, migrar si se agrega columna estudio_id
+    token = f"estudio #{estudio_id}"
+    stmt = select(Aviso).where(
+        Aviso.usuario_id == usuario_id,
+        Aviso.leido.is_(False),
+        Aviso.mensaje.ilike(f"%{token}%"),
+    )
+    patron = re.compile(rf"estudio #{estudio_id}(?!\d)", re.IGNORECASE)
+    actualizados = 0
+    for aviso in db.session.scalars(stmt).all():
+        if patron.search(aviso.mensaje):
+            aviso.leido = True
+            actualizados += 1
+    return actualizados
+
+
+def listar_avisos_usuario(
+    usuario_id: int,
+    *,
+    canal: CanalAviso = CanalAviso.APP,
+    solo_no_leidos: bool = False,
+    limite: int = 50,
+) -> list[Aviso]:
+    """Lista avisos del usuario en el canal indicado ordenados del mas reciente al mas antiguo."""
+    stmt = select(Aviso).where(
+        Aviso.usuario_id == usuario_id,
+        Aviso.canal == canal,
+    )
+    if solo_no_leidos:
+        stmt = stmt.where(Aviso.leido.is_(False))
+    stmt = stmt.order_by(Aviso.created_at.desc(), Aviso.id.desc()).limit(limite)
+    return list(db.session.scalars(stmt).all())
+
+
+def contar_avisos_no_leidos(usuario_id: int, *, canal: CanalAviso = CanalAviso.APP) -> int:
+    """Cuenta los avisos no leidos del usuario en el canal indicado."""
+    stmt = select(func.count(Aviso.id)).where(
+        Aviso.usuario_id == usuario_id,
+        Aviso.canal == canal,
+        Aviso.leido.is_(False),
+    )
+    return int(db.session.scalar(stmt) or 0)
 
 
 def guardar_cambios() -> None:
