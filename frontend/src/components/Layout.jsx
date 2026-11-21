@@ -22,7 +22,10 @@ const MENU_POR_ROL = {
     administrativo: [{ to: "/administracion/estudios", label: "Carga de datos ACTG" }],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],
     transportista: [{ to: "/transporte/orden-del-dia", label: "Orden diaria" }],
-    admin_general: [{ to: "/admin/dashboard", label: "Panel general" }],
+    admin_general: [
+    { to: "/admin/dashboard", label: "Panel general" },
+    { to: "/admin/gerentes-medicos/nuevo", label: "Alta gerente médico" },
+],
 };
 
 const ETIQUETA_ROL = {
