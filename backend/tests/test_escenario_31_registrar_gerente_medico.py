@@ -1,4 +1,5 @@
-from src.core.models import Especialidad, Usuario
+from sqlalchemy import select
+from src.core.models import Especialidad, Rol, Usuario
 from src.core.services.seguridad import (
     SCOPE_ACCESO_COMPLETO,
     emitir_token,
@@ -27,3 +28,15 @@ def _payload(ids):
     return {"nombre": "Laura", "apellido": "Gómez", "telefono": "+5492214556677",
             "email": "laura.gomez@exoma.com", "password": "ClaveSegura2026!",
             "matricula": "MP-114589", "especialidades_ids": ids}
+
+
+def test_rechaza_telefono_con_formato_invalido(app, client, session):
+    e1, _ = _seed_especialidades(session)
+    admin = _crear_usuario(session, Rol.ADMIN_GENERAL)
+    payload = {**_payload([e1.id]), "telefono": "hola"}
+
+    resp = client.post(URL, json=payload, headers=_headers(app, admin))
+
+    assert resp.status_code == 422
+    assert resp.get_json()["code"] == "DATOS_ENTRADA_INVALIDOS"
+    assert session.scalar(select(Usuario).where(Usuario.email == "laura.gomez@exoma.com")) is None

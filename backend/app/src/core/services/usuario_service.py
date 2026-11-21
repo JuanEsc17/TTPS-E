@@ -14,6 +14,7 @@ from src.core.services.seguridad import hashear_password, validar_politica_passw
 
 logger = logging.getLogger(__name__)
 _REGEX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_REGEX_TELEFONO = re.compile(r"^\+?[\d\s\-()]{7,20}$")  # mismo criterio que medico_service
 
 
 def registrar_gerente_medico(
@@ -41,6 +42,8 @@ def registrar_gerente_medico(
     matricula = matricula.strip()
     if not all([nombre, apellido, telefono, email, password, matricula]):
         raise ErrorDatosInvalidos("Todos los campos son obligatorios.")
+    if not _REGEX_TELEFONO.match(telefono):
+        raise ErrorDatosInvalidos("El teléfono no tiene un formato válido.")
     if not _REGEX_EMAIL.match(email):
         raise ErrorDatosInvalidos("El correo electrónico no tiene un formato válido.")
     if len(matricula) > 50:
