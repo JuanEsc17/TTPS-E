@@ -36,6 +36,7 @@ from src.core.models import (
 from src.core.repos import bioinformatica_repo, clinica_repo, usuario_repo
 from src.core.services import auditoria_service, resultado_service
 from src.core.services.excepciones import ErrorDominio
+from src.core.services.formato_correo import asunto_correo, formatear_correo
 
 logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
@@ -338,10 +339,32 @@ def cargar_datos_crudos(
 
     cliente_email = resultado_service.resolver_email_client(email_client, cliente_cls=EmailClient)
     if destinatarios and cliente_email is not None:
+        simbolos_estudio = sorted({eg.gen.simbolo for eg in estudio.genes if eg.gen is not None})
+        detalles_estudio = [
+            f"Estudio: #{estudio.id} (Análisis #{analisis.id} · Inicial)",
+            f"Prioridad: {'POMPE URGENTE' if estudio.es_pompe_urgente else 'Estándar'}",
+        ]
+        if estudio.patologia_sospechada is not None:
+            detalles_estudio.append(f"Patología sospechada: {estudio.patologia_sospechada.nombre}")
+        if simbolos_estudio:
+            detalles_estudio.append(f"Genes a analizar: {', '.join(simbolos_estudio)}")
+        cuerpo_bio = formatear_correo(
+            titulo="Nuevo estudio disponible para bioinformática",
+            introduccion=(
+                f"Se cargaron los datos crudos provenientes de Corea para el estudio #{estudio.id} "
+                "y ya se encuentra disponible en la bandeja de análisis."
+            ),
+            destacado=["PRIORIDAD ALTA · POMPE URGENTE"] if estudio.es_pompe_urgente else None,
+            secciones=[("Resumen del estudio", detalles_estudio)],
+            cierre="Ingresá a la bandeja de bioinformática para tomar el estudio y comenzar el análisis.",
+        )
         enviado = resultado_service.enviar_email_resiliente(
             cliente_email,
-            asunto=f"Estudio #{estudio.id} en analisis por bioinformatica",
-            mensaje=aviso_msg,
+            asunto=asunto_correo(
+                f"Estudio #{estudio.id} listo para análisis bioinformático"
+                + (" [POMPE URGENTE]" if estudio.es_pompe_urgente else "")
+            ),
+            mensaje=cuerpo_bio,
             destinatarios=destinatarios,
             referencia=f"DATOS-CRUDOS-{estudio.id}",
             idempotency_key=f"datos-crudos-{estudio.id}-{datos_crudos.id}",
@@ -1048,7 +1071,6 @@ def _notificar_bioinformaticos_reanalisis(
     simbolos_nuevos: list[str],
     avisos_mail: list[Aviso],
     destinatarios: list[str],
-    aviso_msg: str,
     email_client: EmailClient | None,
 ) -> None:
     mail_equipo = os.environ.get("BIOINFORMATICA_EQUIPO_EMAIL", "").strip()
@@ -1057,10 +1079,30 @@ def _notificar_bioinformaticos_reanalisis(
 
     cliente_email = resultado_service.resolver_email_client(email_client, cliente_cls=EmailClient)
     if destinatarios and cliente_email is not None:
+        detalles_reanalisis = [
+            f"Estudio: #{estudio.id} (Reanálisis #{analisis_id})",
+            f"Nuevos genes solicitados: {', '.join(simbolos_nuevos)}",
+            "Datos crudos: reutiliza la secuencia ACTG existente (sin nueva muestra).",
+        ]
+        if estudio.patologia_sospechada is not None:
+            detalles_reanalisis.append(f"Patología sospechada: {estudio.patologia_sospechada.nombre}")
+        cuerpo_reanalisis = formatear_correo(
+            titulo="Solicitud de reanálisis bioinformático",
+            introduccion=(
+                f"Se solicitó un reanálisis sobre el estudio #{estudio.id}. "
+                "El estudio volvió a la bandeja de bioinformática."
+            ),
+            destacado=[
+                f"Estudio #{estudio.id} · Reanálisis #{analisis_id}",
+                f"Nuevos genes: {', '.join(simbolos_nuevos)}",
+            ],
+            secciones=[("Detalle de la solicitud", detalles_reanalisis)],
+            cierre="Ingresá a la bandeja de bioinformática para tomar el reanálisis.",
+        )
         enviado = resultado_service.enviar_email_resiliente(
             cliente_email,
-            asunto=f"Reanalisis disponible - Estudio #{estudio.id} ({', '.join(simbolos_nuevos)})",
-            mensaje=aviso_msg,
+            asunto=asunto_correo(f"Reanálisis disponible · Estudio #{estudio.id} ({', '.join(simbolos_nuevos)})"),
+            mensaje=cuerpo_reanalisis,
             destinatarios=destinatarios,
             referencia=f"REANALISIS-{estudio.id}-{analisis_id}",
             idempotency_key=f"reanalisis-{estudio.id}-{analisis_id}",
@@ -1354,7 +1396,6 @@ def solicitar_reanalisis_estudio(
         simbolos_nuevos=simbolos_nuevos,
         avisos_mail=avisos_mail,
         destinatarios=destinatarios,
-        aviso_msg=aviso_msg,
         email_client=email_client,
     )
 

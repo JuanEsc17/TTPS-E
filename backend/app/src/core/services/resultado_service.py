@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from flask import current_app, has_app_context
-from fpdf import FPDF
-from fpdf.enums import XPos, YPos
 from sqlalchemy.exc import SQLAlchemyError
 from src.clients import (
     ClienteConexionError,
@@ -30,6 +28,7 @@ from src.core.models import (
     Resultado,
     Rol,
     TipoAccionAuditoria,
+    TipoAnalisis,
     Usuario,
     Variante,
     calcular_conclusion_diagnostica,
@@ -37,6 +36,8 @@ from src.core.models import (
 from src.core.repos import bioinformatica_repo
 from src.core.services import auditoria_service
 from src.core.services.excepciones import ErrorDominio
+from src.core.services.formato_correo import asunto_correo, formatear_correo
+from src.core.services.pdf_resultado import construir_pdf_resultado
 
 logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
@@ -137,10 +138,6 @@ def enviar_email_resiliente(
     return False
 
 
-def _texto_latin1(valor: Any) -> str:
-    return str(valor or "-").encode("latin-1", "replace").decode("latin-1")
-
-
 def _generar_pdf_resultado(
     *,
     estudio: Estudio,
@@ -153,142 +150,17 @@ def _generar_pdf_resultado(
     resultado_id: int | None = None,
     pdf_path_log: str | None = None,
 ) -> None:
-    """Compila el informe clinico del estudio en PDF usando fpdf2."""
+    """Compila el informe clinico del estudio en PDF vectorial usando fpdf2."""
     try:
         ruta_fisica.parent.mkdir(parents=True, exist_ok=True)
-        pdf = FPDF()
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-
-        pdf.set_font("Helvetica", "B", 15)
-        pdf.cell(
-            0,
-            10,
-            _texto_latin1("Laboratorio de Exoma Clinico - Informe de Resultado"),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
+        pdf = construir_pdf_resultado(
+            estudio=estudio,
+            analisis=analisis,
+            variantes=variantes,
+            diagnostico=diagnostico,
+            fecha_proximo_estudio=fecha_proximo_estudio,
+            generado_en=generado_en,
         )
-
-        pdf.set_font("Helvetica", "", 10)
-        pdf.cell(
-            0,
-            6,
-            _texto_latin1(
-                f"Estudio #{estudio.id} | Analisis #{analisis.id} ({analisis.tipo.value}) | "
-                f"Fecha: {generado_en.strftime('%d/%m/%Y %H:%M')}"
-            ),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-        pdf.ln(3)
-
-        paciente_u = estudio.paciente.usuario if estudio.paciente else None
-        medico_u = estudio.medico.usuario if estudio.medico else None
-        patologia = estudio.patologia_sospechada
-
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 7, _texto_latin1("Datos clinicos"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        if paciente_u and estudio.paciente:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1(
-                    f"Paciente: {paciente_u.nombre} {paciente_u.apellido} | "
-                    f"DNI: {estudio.paciente.dni} | Nacimiento: {estudio.paciente.fecha_nacimiento}"
-                ),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        if medico_u and estudio.medico:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1(
-                    f"Medico tratante: {medico_u.nombre} {medico_u.apellido} (Mat. {estudio.medico.matricula})"
-                ),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        if patologia:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1(f"Patologia sospechada: {patologia.nombre}"),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-
-        simbolos_genes = ", ".join(
-            sorted(
-                {
-                    f"{ag.gen.simbolo} ({ag.gen.nombre})" if ag.gen.nombre else ag.gen.simbolo
-                    for ag in analisis.genes
-                    if ag.gen is not None
-                }
-            )
-        ) or "Sin genes asociados"
-        pdf.multi_cell(
-            0,
-            6,
-            _texto_latin1(f"Genes analizados: {simbolos_genes}"),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-        pdf.ln(3)
-
-        etiqueta_diag = {
-            ConclusionDiagnostica.POSITIVO: "POSITIVO (variante patogenica detectada)",
-            ConclusionDiagnostica.VUS: "VUS (Variante de Significado Incierto)",
-            ConclusionDiagnostica.NEGATIVO: "NEGATIVO (sin variantes patogenicas ni VUS)",
-        }[diagnostico]
-        pdf.set_font("Helvetica", "B", 12)
-        pdf.cell(
-            0,
-            8,
-            _texto_latin1(f"Conclusion diagnostica: {etiqueta_diag}"),
-            new_x=XPos.LMARGIN,
-            new_y=YPos.NEXT,
-        )
-
-        if diagnostico == ConclusionDiagnostica.VUS and fecha_proximo_estudio is not None:
-            pdf.set_font("Helvetica", "B", 10)
-            pdf.multi_cell(
-                0,
-                6,
-                _texto_latin1(
-                    f"Recomendacion de nuevo estudio / reevaluacion VUS: "
-                    f"{fecha_proximo_estudio.strftime('%d/%m/%Y')} ({fecha_proximo_estudio.isoformat()})"
-                ),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        pdf.ln(3)
-
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.cell(0, 7, _texto_latin1("Variantes encontradas"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", "", 10)
-        if not variantes:
-            pdf.cell(
-                0,
-                6,
-                _texto_latin1("No se detectaron variantes respecto al genoma de referencia."),
-                new_x=XPos.LMARGIN,
-                new_y=YPos.NEXT,
-            )
-        else:
-            for v in variantes:
-                simbolo = v.gen.simbolo if v.gen else f"Gen#{v.gen_id}"
-                clinvar = v.clinvar_id or "-"
-                pdf.multi_cell(
-                    0,
-                    6,
-                    _texto_latin1(
-                        f"- {simbolo} | {v.notacion} | ClinVar: {clinvar} | Clasificacion: {v.clasificacion.value}"
-                    ),
-                    new_x=XPos.LMARGIN,
-                    new_y=YPos.NEXT,
-                )
 
         ruta_tmp = ruta_fisica.with_name(f".{ruta_fisica.name}.{os.getpid()}.{time.time_ns()}.tmp")
         try:
@@ -440,13 +312,47 @@ def preparar_resultado_en_transaccion(
         estudio.estado.value,
     )
 
+    etiqueta_diag_correo = {
+        ConclusionDiagnostica.POSITIVO: "POSITIVO (variante patogénica detectada)",
+        ConclusionDiagnostica.VUS: "VUS · Variante de Significado Incierto",
+        ConclusionDiagnostica.NEGATIVO: "NEGATIVO (sin variantes patogénicas ni VUS)",
+    }[diagnostico]
+    tipo_etiqueta = "Reanálisis" if analisis.tipo == TipoAnalisis.REANALISIS else "Inicial"
+    destacado_mail = [f"Conclusión diagnóstica: {etiqueta_diag_correo}"]
+    if diagnostico == ConclusionDiagnostica.VUS and fecha_proximo_estudio is not None:
+        destacado_mail.append(
+            f"Reevaluación VUS sugerida: {fecha_proximo_estudio.strftime('%d/%m/%Y')} ({fecha_proximo_estudio.isoformat()})"
+        )
+    resumen_mail = [
+        f"Estudio: #{estudio.id} (Análisis #{analisis.id} · {tipo_etiqueta})",
+        f"Fecha de emisión: {ahora.strftime('%d/%m/%Y %H:%M')}",
+    ]
+    if estudio.patologia_sospechada is not None:
+        resumen_mail.append(f"Patología sospechada: {estudio.patologia_sospechada.nombre}")
+    mensaje_correo = formatear_correo(
+        titulo="Resultado de estudio disponible",
+        introduccion=f"Ya se encuentra disponible el informe clínico correspondiente al estudio #{estudio.id}.",
+        destacado=destacado_mail,
+        secciones=[
+            ("Resumen del informe", resumen_mail),
+            (
+                "Cómo consultar el resultado",
+                [
+                    "Ingresá al portal con tu usuario y contraseña para visualizar el detalle completo de variantes.",
+                    "Desde la ficha del estudio podrás descargar el informe clínico oficial en formato PDF.",
+                ],
+            ),
+        ],
+        cierre="Ante cualquier consulta sobre la interpretación clínica, comunicate con el médico tratante.",
+    )
+
     contexto_mail = {
         "estudio_id": estudio.id,
         "resultado_id": resultado.id,
         "diagnostico": diagnostico.value,
         "fecha_proximo_estudio": fecha_vus_nueva,
         "destinatarios": emails_unicos,
-        "mensaje": aviso_texto,
+        "mensaje": mensaje_correo,
     }
     return resultado, ruta_fisica, avisos_mail, contexto_mail
 
@@ -462,7 +368,7 @@ def despachar_correos_resultado(
     cliente = resolver_email_client(email_client, cliente_cls=cliente_cls)
     enviado = enviar_email_resiliente(
         cliente,
-        asunto=f"Resultado disponible - Estudio #{contexto_mail['estudio_id']}",
+        asunto=asunto_correo(f"Resultado disponible · Estudio #{contexto_mail['estudio_id']}"),
         mensaje=contexto_mail["mensaje"],
         destinatarios=contexto_mail["destinatarios"],
         referencia=f"RESULTADO-{contexto_mail['resultado_id']}",

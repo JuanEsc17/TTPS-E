@@ -9,6 +9,7 @@ from src.clients.familiograma_client import PARENTESCOS_POR_NOMBRE, Familiograma
 from src.core.repos import clinica_repo, paciente_repo, usuario_repo
 from src.core.services import clinica_service
 from src.core.services.excepciones import ErrorDominio
+from src.core.services.formato_correo import asunto_correo, formatear_correo
 from src.core.services.seguridad import hashear_password
 
 _STORAGE_FAMILIOGRAMAS = Path("storage/familiogramas")
@@ -198,11 +199,33 @@ def dar_de_alta_paciente(
     )
 
     # Envia credenciales iniciales por mail (si falla la red externa no revierte el alta)
+    cuerpo_mail = formatear_correo(
+        titulo="Bienvenido/a al portal de pacientes",
+        saludo=f"Hola {datos['nombre']} {datos['apellido']},",
+        introduccion=(
+            "Tu médico tratante registró tu cuenta en el Sistema de Seguimiento "
+            "de Estudios de Exoma Clínico."
+        ),
+        destacado=[
+            f"Usuario: {email}",
+            f"Contraseña temporal: {password_temporal}",
+        ],
+        secciones=[
+            (
+                "Próximos pasos",
+                [
+                    "Ingresá al portal utilizando tu correo electrónico y la contraseña temporal.",
+                    "En tu primer inicio de sesión deberás establecer una contraseña personal.",
+                ],
+            )
+        ],
+        cierre="Ante cualquier consulta, comunicate con tu médico tratante.",
+    )
     try:
         cliente_mail = email_client or EmailClient(timeout=5.0)
         cliente_mail.enviar_aviso(
-            asunto="Alta de paciente - Credenciales iniciales",
-            mensaje=mensaje_aviso,
+            asunto=asunto_correo("Alta de paciente · Credenciales iniciales"),
+            mensaje=cuerpo_mail,
             destinatarios=[email],
             referencia=f"paciente-{paciente.id}",
         )
