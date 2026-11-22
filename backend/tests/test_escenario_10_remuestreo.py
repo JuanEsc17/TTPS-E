@@ -367,6 +367,17 @@ def test_tc03_ciclo_completo_segunda_extraccion_sin_costo(app, client, session, 
     )
     assert r_rem.status_code == 200
 
+    # El paciente ve el estudio en Remuestreo requerido con su historial de viaje a Corea
+    r_mis_rem = client.get("/api/estudios/mis-estudios", headers=headers_pac)
+    assert r_mis_rem.status_code == 200
+    est_mis_rem = next(e for e in r_mis_rem.get_json()["estudios"] if e["estudio_id"] == est_1.id)
+    assert est_mis_rem["estado"] == EstadoEstudio.REMUESTREO_REQUERIDO.value
+    assert len(est_mis_rem["historial_remuestreos"]) == 1
+    assert est_mis_rem["historial_remuestreos"][0]["viajo_a_corea"] is True
+    assert est_mis_rem["historial_remuestreos"][0]["estado_origen"] == EstadoEstudio.EN_VIAJE_COREA.value
+    assert est_mis_rem["historial_remuestreos"][0]["sample_set_id"] == muestra_1.sample_set_id
+    assert est_mis_rem["historial_remuestreos"][0]["motivo_descarte"] == "desnaturalizada"
+
     # 2. Paciente saca 2do turno sin pagar de nuevo (Escenario 7)
     horario = _proximo_dia_habil(10, 15)
     r_turno = client.post(
@@ -392,6 +403,15 @@ def test_tc03_ciclo_completo_segunda_extraccion_sin_costo(app, client, session, 
     assert est_1.muestra_vigente.id == muestra_2_id
     assert est_1.muestra_vigente.id != muestra_1.id
     assert est_1.muestra_vigente.sample_set_id is None
+
+    # El historial de que la 1ra muestra viajo a Corea y requirio remuestreo persiste tras la 2da toma
+    r_mis_post = client.get("/api/estudios/mis-estudios", headers=headers_pac)
+    assert r_mis_post.status_code == 200
+    est_mis_post = next(e for e in r_mis_post.get_json()["estudios"] if e["estudio_id"] == est_1.id)
+    assert est_mis_post["estado"] == EstadoEstudio.LISTA_PARA_RETIRAR.value
+    assert len(est_mis_post["historial_remuestreos"]) == 1
+    assert est_mis_post["historial_remuestreos"][0]["muestra_id"] == muestra_1.id
+    assert est_mis_post["historial_remuestreos"][0]["viajo_a_corea"] is True
 
 
 def test_tc04_y_tc05_permisos_y_estados_invalidos(app, client, session, datos_remuestreo):

@@ -229,10 +229,15 @@ export default function EstudiosResultadosPage({ sesion }) {
                                 const badgeDiag = est.resultado?.diagnostico
                                     ? BADGE_DIAGNOSTICO[est.resultado.diagnostico]
                                     : null;
+                                const requiereRemuestreo = est.estado === "Remuestreo requerido";
                                 return (
                                     <li
                                         key={est.estudio_id}
-                                        className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200/90 bg-white/95 p-4 shadow-2xs transition hover:border-[#0B4F8A]/40"
+                                        className={`flex flex-wrap items-center justify-between gap-4 rounded-xl border p-4 shadow-2xs transition ${
+                                            requiereRemuestreo
+                                                ? "border-amber-300/90 bg-amber-50/40 hover:border-amber-400"
+                                                : "border-slate-200/90 bg-white/95 hover:border-[#0B4F8A]/40"
+                                        }`}
                                     >
                                         <div className="min-w-0 space-y-1">
                                             <div className="flex flex-wrap items-center gap-2">
@@ -243,7 +248,9 @@ export default function EstudiosResultadosPage({ sesion }) {
                                                     className={`rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${
                                                         est.tiene_resultado
                                                             ? "border-cyan-200 bg-cyan-50 text-[#0B4F8A]"
-                                                            : "border-slate-200 bg-slate-100 text-slate-600"
+                                                            : requiereRemuestreo
+                                                                ? "border-amber-200 bg-amber-50 text-amber-800"
+                                                                : "border-slate-200 bg-slate-100 text-slate-600"
                                                     }`}
                                                 >
                                                     {est.estado}
@@ -281,6 +288,42 @@ export default function EstudiosResultadosPage({ sesion }) {
                                                     </span>
                                                 )}
                                             </p>
+
+                                            {esPaciente && requiereRemuestreo && (
+                                                <p className="text-[11px] font-medium text-amber-800">
+                                                    Tu muestra requiere una nueva extracción sin cargo adicional.
+                                                </p>
+                                            )}
+
+                                            {Array.isArray(est.historial_remuestreos) &&
+                                                est.historial_remuestreos.length > 0 && (
+                                                    <div className="space-y-1 pt-0.5">
+                                                        {est.historial_remuestreos.map((h) => (
+                                                            <p
+                                                                key={h.muestra_id}
+                                                                className="text-[11px] text-slate-600"
+                                                            >
+                                                                <span className="font-semibold text-slate-700">
+                                                                    Historial de muestra:
+                                                                </span>{" "}
+                                                                Muestra #{h.muestra_id}
+                                                                {h.sample_set_id
+                                                                    ? ` (Lote #${h.sample_set_id})`
+                                                                    : ""}{" "}
+                                                                ·{" "}
+                                                                {h.viajo_a_corea
+                                                                    ? "Viajó a Corea"
+                                                                    : h.estado_origen || "En proceso"}{" "}
+                                                                → Remuestreo requerido (
+                                                                {h.motivo_descarte_label || h.motivo_descarte}
+                                                                )
+                                                                {h.fecha
+                                                                    ? ` · ${formatearSoloFecha(h.fecha)}`
+                                                                    : ""}
+                                                            </p>
+                                                        ))}
+                                                    </div>
+                                                )}
 
                                             {est.tiene_resultado && est.fecha_reevaluacion_vus && (
                                                 <p className="text-[11px] font-medium text-amber-800">
@@ -321,6 +364,25 @@ export default function EstudiosResultadosPage({ sesion }) {
                                                             ? "Descargando..."
                                                             : "Descargar PDF"}
                                                     </button>
+                                                </>
+                                            ) : esPaciente && (requiereRemuestreo || est.habilitado_para_turno) ? (
+                                                <>
+                                                    <Link
+                                                        to={`/paciente/estudios/${est.estudio_id}/turno`}
+                                                        className="rounded-xl bg-[#0B4F8A] px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-[#093E6D] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-1"
+                                                    >
+                                                        {requiereRemuestreo
+                                                            ? "Solicitar nuevo turno"
+                                                            : "Solicitar turno"}
+                                                    </Link>
+                                                    {est.cantidad_analisis > 1 && (
+                                                        <Link
+                                                            to={`/estudios/${est.estudio_id}/resultado`}
+                                                            className="rounded-xl border border-[#0B4F8A] bg-white px-3.5 py-2 text-xs font-semibold text-[#0B4F8A] transition hover:bg-[#EAF2FA] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-1"
+                                                        >
+                                                            Ver historial
+                                                        </Link>
+                                                    )}
                                                 </>
                                             ) : est.cantidad_analisis > 1 ? (
                                                 <Link

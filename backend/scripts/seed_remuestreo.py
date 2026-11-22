@@ -9,8 +9,10 @@ from src import create_app
 from src.core.database import create_tables, db
 from src.core.models import (
     Autorizacion,
+    Aviso,
     CentroExtraccion,
     DispositivoConocido,
+    EntidadAuditable,
     EstadoEstudio,
     EstadoSampleSet,
     Estudio,
@@ -20,6 +22,7 @@ from src.core.models import (
     Pago,
     Patologia,
     Presupuesto,
+    RegistroModificacion,
     ResultadoAutorizacion,
     Rol,
     SampleSet,
@@ -171,6 +174,7 @@ def cargar_estudios_remuestreo() -> list[dict]:
         )
 
         sample_sets_previos: set[int] = set()
+        db.session.execute(delete(Aviso).where(Aviso.usuario_id == medico.usuario_id))
         for idx, caso in enumerate(CASOS_REMUESTREO, start=1):
             patologia = _asegurar_patologia(caso["patologia"], caso["patologia_desc"])
 
@@ -227,13 +231,20 @@ def cargar_estudios_remuestreo() -> list[dict]:
                 db.session.add(paciente)
                 db.session.flush()
 
-            # Limpieza idempotente de estudios previos de estos pacientes semilla
+            # Limpieza idempotente de estudios y avisos previos de estos pacientes semilla
+            db.session.execute(delete(Aviso).where(Aviso.usuario_id == u_pac.id))
             for est_prev in list(
                 db.session.scalars(select(Estudio).where(Estudio.paciente_id == paciente.id)).all()
             ):
                 for m_prev in est_prev.muestras:
                     if m_prev.sample_set_id is not None:
                         sample_sets_previos.add(m_prev.sample_set_id)
+                db.session.execute(
+                    delete(RegistroModificacion).where(
+                        RegistroModificacion.entidad_tipo == EntidadAuditable.ESTUDIO,
+                        RegistroModificacion.entidad_id == est_prev.id,
+                    )
+                )
                 db.session.execute(delete(Muestra).where(Muestra.estudio_id == est_prev.id))
                 db.session.execute(delete(Turno).where(Turno.estudio_id == est_prev.id))
                 pres_prev = db.session.scalar(

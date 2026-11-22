@@ -17,6 +17,7 @@ import MisTurnosPage from "./pages/MisTurnosPage";
 import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
 import RegistroMuestraAdminPage from "./pages/RegistroMuestraAdminPage";
+import RemuestreoAdminPage from "./pages/RemuestreoAdminPage";
 import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 import AltaGerenteMedicoPage from "./pages/AltaGerenteMedicoPage";
@@ -91,6 +92,10 @@ export default function App() {
           <Route
             path="/administracion/muestras"
             element={<RegistroMuestraAdminPage sesion={sesion} />}
+          />
+          <Route
+            path="/administracion/remuestreos"
+            element={<RemuestreoAdminPage sesion={sesion} />}
           />
           <Route
             path="/bioinformatica/cola"

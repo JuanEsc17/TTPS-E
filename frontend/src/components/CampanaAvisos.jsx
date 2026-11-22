@@ -205,6 +205,10 @@ export default function CampanaAvisos({ sesion }) {
                                         rol === "bioinformatico" &&
                                         !esResultado &&
                                         /reanalisis|bioinformatic/i.test(aviso.mensaje || "");
+                                    const esRemuestreo =
+                                        rol === "paciente" &&
+                                        !esResultado &&
+                                        /remuestreo/i.test(aviso.mensaje || "");
                                     const fecha = formatearFechaAviso(
                                         aviso.enviado_en || aviso.created_at
                                     );
@@ -244,6 +248,14 @@ export default function CampanaAvisos({ sesion }) {
                                                         className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
                                                     >
                                                         Ir a bandeja →
+                                                    </Link>
+                                                ) : esRemuestreo ? (
+                                                    <Link
+                                                        to="/paciente/turno"
+                                                        onClick={() => setAbierto(false)}
+                                                        className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
+                                                    >
+                                                        Sacar nuevo turno →
                                                     </Link>
                                                 ) : null}
                                             </div>

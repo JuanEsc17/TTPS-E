@@ -49,3 +49,36 @@ export function registrarTomaMuestraRequest({ token, turnoId, tomadaEn } = {}) {
         body,
     });
 }
+
+export function listarEstudiosRemuestreablesRequest(
+    token,
+    { dni, estudioId } = {}
+) {
+    const params = new URLSearchParams();
+    if (dni && String(dni).trim()) {
+        params.set("dni", String(dni).trim());
+    }
+    if (estudioId !== undefined && estudioId !== null && String(estudioId).trim() !== "") {
+        params.set("estudio_id", String(estudioId).trim());
+    }
+    const qs = params.toString();
+    return requestMuestras(`/api/v1/muestras/remuestreables${qs ? `?${qs}` : ""}`, { token });
+}
+
+export function solicitarRemuestreoRequest({
+    token,
+    estudioId,
+    motivoDescarte,
+    observacionesCalidad,
+    motivo,
+}) {
+    return requestMuestras(`/api/v1/estudios/${estudioId}/remuestreo`, {
+        token,
+        method: "POST",
+        body: {
+            motivo_descarte: motivoDescarte,
+            observaciones_calidad: observacionesCalidad?.trim() || null,
+            motivo: motivo?.trim() || "",
+        },
+    });
+}

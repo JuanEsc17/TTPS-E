@@ -33,11 +33,12 @@ from src.core.models import (
     Variante,
     calcular_conclusion_diagnostica,
 )
-from src.core.repos import bioinformatica_repo
+from src.core.repos import auditoria_repo, bioinformatica_repo
 from src.core.services import almacenamiento_service, auditoria_service
 from src.core.services.excepciones import ErrorDominio
 from src.core.services.formato_correo import asunto_correo, formatear_correo
 from src.core.services.pdf_resultado import construir_pdf_resultado
+from src.core.services.turno_service import TurnoService
 
 logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
@@ -45,6 +46,10 @@ _PATRON_ESTUDIO_AVISO = re.compile(r"estudio #(\d+)(?!\d)", re.IGNORECASE)
 _ROLES_PERMITIDOS_RESULTADO = frozenset(
     {Rol.PACIENTE, Rol.MEDICO, Rol.GERENTE_MEDICO, Rol.BIOINFORMATICO}
 )
+_ETIQUETAS_MOTIVO_DESCARTE: dict[str, str] = {
+    "adn_insuficiente": "ADN insuficiente",
+    "desnaturalizada": "Muestra desnaturalizada",
+}
 
 
 def ahora_utc_naive() -> datetime:
@@ -519,6 +524,53 @@ def _serializar_resultado_analisis(
     }
 
 
+def _serializar_historial_remuestreos(
+    estudio: Estudio,
+    registros: list[Any],
+) -> list[dict[str, Any]]:
+    """Arma el historial de muestras descartadas y viajes a Corea previos del estudio."""
+    por_muestra_id: dict[int, Any] = {}
+    for reg in registros:
+        cambios = reg.cambios if isinstance(reg.cambios, dict) else {}
+        estado_nuevo = (cambios.get("estado") or {}).get("nuevo")
+        if estado_nuevo != EstadoEstudio.REMUESTREO_REQUERIDO.value:
+            continue
+        muestra_id = (cambios.get("muestra_descartada_id") or {}).get("nuevo")
+        if isinstance(muestra_id, int):
+            por_muestra_id[muestra_id] = reg
+
+    historial: list[dict[str, Any]] = []
+    for muestra in estudio.muestras:
+        if muestra.motivo_descarte is None:
+            continue
+        reg = por_muestra_id.get(muestra.id)
+        cambios = reg.cambios if (reg and isinstance(reg.cambios, dict)) else {}
+        estado_origen = (cambios.get("estado") or {}).get("anterior")
+        if estado_origen is None and muestra.sample_set_id is not None:
+            estado_origen = EstadoEstudio.EN_VIAJE_COREA.value
+        fecha_evento = (reg.fecha if reg else None) or muestra.updated_at or muestra.created_at
+        motivo_valor = muestra.motivo_descarte.value
+        historial.append(
+            {
+                "muestra_id": muestra.id,
+                "sample_set_id": muestra.sample_set_id,
+                "estado_origen": estado_origen,
+                "viajo_a_corea": (
+                    estado_origen == EstadoEstudio.EN_VIAJE_COREA.value
+                    or muestra.sample_set_id is not None
+                ),
+                "motivo_descarte": motivo_valor,
+                "motivo_descarte_label": _ETIQUETAS_MOTIVO_DESCARTE.get(
+                    motivo_valor, motivo_valor
+                ),
+                "observaciones_calidad": muestra.observaciones_calidad,
+                "motivo": reg.motivo if reg else None,
+                "fecha": fecha_evento.isoformat() if fecha_evento else None,
+            }
+        )
+    return historial
+
+
 def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
     """Lista los estudios visibles para el usuario autenticado junto al resumen de su resultado."""
     if usuario.rol not in _ROLES_PERMITIDOS_RESULTADO:
@@ -531,6 +583,10 @@ def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
         estudios = bioinformatica_repo.listar_estudios_de_medico(medico.id) if medico else []
     else:
         estudios = bioinformatica_repo.listar_estudios_por_estado(EstadoEstudio.RESULTADO_CARGADO)
+
+    auditorias_por_estudio = auditoria_repo.listar_cambios_estado_estudios(
+        [e.id for e in estudios]
+    )
 
     items: list[dict[str, Any]] = []
     for est in estudios:
@@ -559,6 +615,12 @@ def listar_estudios_usuario(*, usuario: Usuario) -> list[dict[str, Any]]:
                 "tiene_resultado": tiene_resultado,
                 "tiene_datos_crudos": est.datos_crudos is not None,
                 "cantidad_analisis": len(est.analisis),
+                "habilitado_para_turno": (
+                    usuario.rol == Rol.PACIENTE and TurnoService.estudio_admite_nuevo_turno(est)
+                ),
+                "historial_remuestreos": _serializar_historial_remuestreos(
+                    est, auditorias_por_estudio.get(est.id, [])
+                ),
                 "resultado": (
                     {
                         "resultado_id": res.id,

@@ -66,6 +66,15 @@ class TurnoService:
             or (estudio.estado == EstadoEstudio.TURNO_SACADO and estudio.ausencias < MAX_AUSENCIAS)
         )
 
+    @classmethod
+    def estudio_admite_nuevo_turno(cls, estudio: Estudio) -> bool:
+        """Indica si el estudio esta habilitado y no posee un turno activo pendiente."""
+        turno_activo = next(
+            (t for t in estudio.turnos if t.activo and t.asistio is None),
+            None,
+        )
+        return cls._esta_habilitado_para_turno(estudio) and turno_activo is None
+
     @staticmethod
     def _serializar_centro_dict(centro: CentroExtraccion | None) -> dict[str, Any] | None:
         """Convierte un CentroExtraccion a diccionario plano."""

@@ -27,6 +27,7 @@ from src.core.models import (
     Medico,
     OrigenGen,
     Paciente,
+    Presupuesto,
     Resultado,
     TipoAnalisis,
     Variante,
@@ -39,6 +40,9 @@ def _opciones_estudio_completo():
         selectinload(Estudio.paciente).selectinload(Paciente.usuario),
         selectinload(Estudio.medico).selectinload(Medico.usuario),
         selectinload(Estudio.patologia_sospechada),
+        selectinload(Estudio.muestras),
+        selectinload(Estudio.turnos),
+        selectinload(Estudio.presupuesto).selectinload(Presupuesto.pagos),
         selectinload(Estudio.genes).selectinload(EstudioGen.gen),
         selectinload(Estudio.analisis).selectinload(Analisis.genes).selectinload(AnalisisGen.gen),
         selectinload(Estudio.analisis)
