@@ -65,7 +65,8 @@ class TipoAnalisis(enum.Enum):
 
 
 class MotivoDescarte(enum.Enum):
-    VOLUMEN_INSUFICIENTE = "volumen_insuficiente"   # < 2 ml
+    """Motivos tecnicos validos para descartar una muestra y solicitar remuestreo (ADR-004)."""
+    BAJA_CALIDAD = "baja_calidad"
     ADN_INSUFICIENTE = "adn_insuficiente"
     DESNATURALIZADA = "desnaturalizada"
 

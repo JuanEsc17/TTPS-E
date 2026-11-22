@@ -55,7 +55,6 @@ from .perfiles import Especialidad, Medico, MedicoEspecialidad, Paciente, Transp
 from .reglas import (
     GENES_INCLUIDOS,
     MAX_AUSENCIAS,
-    ML_MINIMOS_TUBO,
     MUESTRAS_POR_SAMPLE_SET,
     PRECIO_BASE_USD,
     PRECIO_GEN_ADICIONAL_USD,
@@ -67,7 +66,6 @@ from .usuarios import Aviso, CodigoVerificacion, DispositivoConocido, Usuario
 __all__ = [
     "GENES_INCLUIDOS",
     "MAX_AUSENCIAS",
-    "ML_MINIMOS_TUBO",
     "MUESTRAS_POR_SAMPLE_SET",
     "PRECIO_BASE_USD",
     "PRECIO_GEN_ADICIONAL_USD",

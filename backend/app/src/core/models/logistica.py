@@ -54,11 +54,12 @@ class Muestra(TimestampMixin, Base):
     estudio_id: Mapped[int] = mapped_column(ForeignKey("estudios.id"), index=True)
     turno_id: Mapped[int | None] = mapped_column(ForeignKey("turnos.id"))
     sample_set_id: Mapped[int | None] = mapped_column(ForeignKey("sample_sets.id"), index=True)
-    mililitros: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
+    mililitros: Mapped[Decimal | None] = mapped_column(Numeric(5, 2))  # deprecado por ADR-004
     tomada_en: Mapped[datetime | None] = mapped_column(DateTime)       # aviso por bot de Telegram
     llegada_lab_central: Mapped[datetime | None] = mapped_column(DateTime)
     # Si no sirve se descarta y se pide una nueva (remuestreo sin costo)
     motivo_descarte: Mapped[MotivoDescarte | None] = mapped_column(Enum(MotivoDescarte))
+    observaciones_calidad: Mapped[str | None] = mapped_column(String(500))
 
     estudio: Mapped[Estudio] = relationship(back_populates="muestras")
     sample_set: Mapped[SampleSet | None] = relationship(back_populates="muestras")
