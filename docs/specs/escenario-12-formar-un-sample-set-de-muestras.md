@@ -30,8 +30,8 @@
 - **Contexto**: Las `Muestra`s llegaron al laboratorio central entregadas por el `Transportista` (Escenario 11) y sus `Estudio`s están en estado `En laboratorio central`. Tras la eliminación de la regla `< 2 ml` (Requerimiento 5 / ADR-004), toda muestra vigente llegada sin `motivo_descarte` integra el lote sin rechazo volumétrico; el sistema las agrupa en lotes de hasta 10 y mantiene el `Sample set` sellado e inmutable una vez cerrado y pasado a `En espera de retiro`.
 - **Recursos**: `Muestra` (`muestras`), `Sample set` (`sample_sets`), `Estudio` (`estudios`), `Registro de modificaciones` (`registro_modificaciones`).
 - **Episodios**:
-  1. El sistema recibe las `Muestra`s en el laboratorio central y verifica que estén vigentes (`motivo_descarte IS NULL` y sin asignación previa a otro `Sample set`).
-  2. El sistema agrupa las `Muestra`s en conjuntos de hasta diez (`MUESTRAS_POR_SAMPLE_SET = 10`).
+  1. El sistema recibe las `Muestra`s en el laboratorio central sin verificación de volumen (`ml`) ni de `motivo_descarte` (el descarte técnico solo ocurre en Escenario 10 cuando la muestra ya está `En viaje a Corea`).
+  2. El sistema agrupa las `Muestra`s (`estudio.estado == En laboratorio central`, `sample_set_id IS NULL`) en conjuntos de hasta diez (`MUESTRAS_POR_SAMPLE_SET = 10`).
   3. El sistema crea o actualiza el `Sample set` correspondiente, registra la trazabilidad en `registro_modificaciones` y, al llegar a 10 muestras (o ante un `Pompe urgente`), lo cierra pasando sus `Estudio`s a `En espera de retiro`.
   4. El sistema mantiene el `Sample set` sin modificar una vez iniciado el siguiente estado (`EstadoSampleSet.CERRADO` / `EstadoEstudio.EN_ESPERA_RETIRO`).
 
@@ -59,22 +59,22 @@
 
 ## Trigger
 
-Evento interno disparado automáticamente al finalizar el **STEP 3 del Escenario 11** (`marcar_llegada_lab_central`), o al confirmarse la recepción de una `Muestra` en el laboratorio central (`POST /api/logistica/muestras/{muestra_id}/recepcion-lab-central`).
+Evento automático disparado al confirmar el `Transportista` la llegada de las muestras al laboratorio central (`POST /api/logistica/ordenes-del-dia/{orden_id}/llegada-laboratorio-central`, `LogisticaService.marcar_llegada_lab_central`). No requiere una segunda confirmación manual posterior.
 
 ---
 
 ## Workflow Tree
 
-### STEP 1: Validación de elegibilidad de cada Muestra recibida (sin control de `< 2 ml`)
-**Actor**: `service` (`LogisticaService.procesar_ingreso_muestra_lab_central`) -> `repo` (`MuestraRepo`, `EstudioRepo`)
+### STEP 1: Validación de elegibilidad de cada Muestra recibida (sin control de `< 2 ml` ni `motivo_descarte`)
+**Actor**: `service` (`LogisticaService.marcar_llegada_lab_central` -> `SampleSetService.incorporar_muestras_en_tx`) -> `repo` (`SampleSetRepo`)
 **Action**: Para cada `Muestra` recién ingresada al laboratorio central:
-1. Verifica que `estudio.estado == EstadoEstudio.EN_LAB_CENTRAL`, que `muestra.motivo_descarte IS NULL` y que `muestra.sample_set_id IS NULL`.
-2. La muestra **no se evalúa por volumen en mililitros** (se elimina definitivamente el rechazo por `< 2 ml` / `VOLUMEN_INSUFICIENTE`, ADR-004). Toda muestra vigente sin descarte técnico previo es apta para integrar un `SampleSet`.
+1. Verifica que `estudio.estado == EstadoEstudio.EN_LAB_CENTRAL` y que `muestra.sample_set_id IS NULL`.
+2. La muestra **no se evalúa por volumen en mililitros ni por `motivo_descarte`** (eliminado el descarte volumétrico `< 2 ml` por ADR-004; el motivo de descarte solo aplica en Escenario 10 durante `En viaje a Corea`). Toda muestra cuyo estudio está en `En laboratorio central` integra un `SampleSet`.
 **Timeout**: 3s
 **Input**: `{ muestra_id: 149, estudio_id: 42 }`
 **Output on SUCCESS**: Muestra apta -> GO TO STEP 2.
 **Output on FAILURE**:
-  - `FAILURE(invalid_state)`: `estudio.estado != EstadoEstudio.EN_LAB_CENTRAL` o la muestra ya tiene `motivo_descarte IS NOT NULL` -> retornar error `409 Conflict` (`code: "MUESTRA_NO_APTA_PARA_SAMPLE_SET"`).
+  - `FAILURE(invalid_state)`: `estudio.estado != EstadoEstudio.EN_LAB_CENTRAL` -> retornar error `409 Conflict` (`code: "MUESTRA_NO_APTA_PARA_SAMPLE_SET"`).
   - `FAILURE(conflict)`: `muestra.sample_set_id IS NOT NULL` (la muestra ya fue agrupada en un `SampleSet` por otra ejecución concurrente) -> operación idempotente: retornar el `sample_set_id` actual sin duplicar asignación.
 
 **Observable states during this step**:
@@ -195,29 +195,20 @@ Estudio (EstadoEstudio):
 
 ## Handoff Contracts
 
-### 1. `Recepción Lab Central / Transportista` -> `LogisticaService.armar_sample_set` (Recepción y armado automático)
-**Endpoint**: `POST /api/logistica/muestras/{muestra_id}/recepcion-lab-central` (o invocación interna directa desde `POST /api/logistica/ordenes-del-dia/{orden_id}/llegada-laboratorio-central`)
-**Payload**:
-```json
-{
-  "muestra_id": 149
-}
-```
+### 1. `Transportista (UI)` -> `LogisticaService.marcar_llegada_lab_central` -> `SampleSetService` (Armado automático al confirmar llegada)
+**Endpoint**: `POST /api/logistica/ordenes-del-dia/{orden_id}/llegada-laboratorio-central`
+**Payload**: `{}` *(sin datos volumétricos de mililitros obligatorios)*
 **Success response** (`200 OK`):
 ```json
 {
   "ok": true,
-  "muestra_id": 149,
-  "estudio_id": 42,
-  "descartada": false,
-  "sample_set": {
-    "id": 12,
-    "estado": "cerrado",
-    "cantidad_muestras": 10,
-    "es_pompe_urgente": false,
-    "cerrado_en": "2026-10-28T16:10:05"
-  },
-  "estado_estudio": "En espera de retiro"
+  "data": {
+    "orden_id": 7,
+    "llegada_lab_central": "2026-10-28T16:10:05",
+    "muestras_recibidas_ids": [140, 141],
+    "estudios_en_lab_central_ids": [33, 34],
+    "sample_sets_afectados_ids": [12]
+  }
 }
 ```
 **Failure response** (`400` / `404` / `409`):
@@ -298,7 +289,7 @@ Estudio (EstadoEstudio):
 | `TC-03`: Cierre automático del `SampleSet` al llegar la décima muestra | Ingresa la muestra número 10 válida al `SampleSet` que tenía 9 muestras | `sample_set.estado == EstadoSampleSet.CERRADO`, `sample_set.cerrado_en is not None`, los **10** `Estudio`s pasan atómicamente a `EstadoEstudio.EN_ESPERA_RETIRO` y todo queda asentado en `registro_modificaciones`. |
 | `TC-04`: Partición automática en múltiples lotes cuando ingresan más de 10 muestras | `SampleSet` abierto tiene 8 muestras e ingresan 5 muestras nuevas en el mismo viaje | Las primeras 2 completan y cierran el `SampleSet #1` (`10/10`, `CERRADO`, estudios en `EN_ESPERA_RETIRO`); las 3 restantes abren un nuevo `SampleSet #2` (`3/10`, `ABIERTO`, estudios en `EN_LAB_CENTRAL`). |
 | `TC-05`: Inmutabilidad de un `SampleSet` cerrado | Llega una nueva muestra luego de que el `SampleSet #1` pasó a `EstadoSampleSet.CERRADO` | El `SampleSet #1` no se modifica jamás; la nueva muestra se asigna a un `SampleSet #2` nuevo. |
-| `TC-06`: Exclusión de muestra descartada o con estado distinto de `EN_LAB_CENTRAL` | Ingresa solicitud sobre muestra con `motivo_descarte = DESNATURALIZADA` o estudio en otro estado | La muestra no se agrega al `SampleSet` (`409 Conflict` / `MUESTRA_NO_APTA_PARA_SAMPLE_SET`). *(Cualquier volumen en `ml` sin descarte previo es aceptado sin límite de 2 ml.)* |
+| `TC-06`: Exclusión de muestra con estado distinto de `EN_LAB_CENTRAL` | Ingresa solicitud sobre muestra cuyo estudio está en otro estado (ej. `TURNO_SACADO` o `EN_ESPERA_RETIRO`) | La muestra no se agrega al `SampleSet` (`409 Conflict` / `MUESTRA_NO_APTA_PARA_SAMPLE_SET`). Cualquier muestra en `EN_LAB_CENTRAL` se acepta sin validar volumen en `ml` ni `motivo_descarte`. |
 | `TC-07`: Concurrencia al cerrar lote entre dos entregas simultáneas | Dos transacciones concurrentes intentan agregar las muestras 10 y 11 al mismo tiempo | El bloqueo `SELECT ... FOR UPDATE` sobre el `SampleSet` abierto garantiza que el primer lote quede exactamente con 10 muestras y la muestra 11 cree un segundo `SampleSet`. |
 
 ---

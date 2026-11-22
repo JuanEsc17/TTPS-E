@@ -11,6 +11,7 @@ from .web.api.turnos import turnos_bp
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 load_dotenv()
 
+from .web.api.admin_usuarios import admin_usuarios_bp
 from .web.api.auth import auth_bp
 from .web.api.bioinformatica import bioinformatica_bp
 from .web.api.chatbot import chatbot_bp
@@ -21,9 +22,10 @@ from .web.api.pacientes import pacientes_bp
 from .web.api.patologias import patologias_bp
 from .web.api.resultados import resultados_bp
 from .web.api.salud import salud_bp
+from .web.api.sample_sets import sample_sets_bp
 from .web.api.snomed import snomed_bp
 from .web.handlers.errors import registrar_manejadores_errores
-from .web.api.admin_usuarios import admin_usuarios_bp  
+
 
 def _cargar_entorno(ruta_env: Path | None = None) -> None:
     """Carga variables desde `.env` sin sobrescribir las ya definidas en el entorno."""
@@ -90,6 +92,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(chatbot_bp)
     app.register_blueprint(bioinformatica_bp)
     app.register_blueprint(resultados_bp)
+    app.register_blueprint(sample_sets_bp)
     app.register_blueprint(salud_bp)
 
     @app.cli.command("init-db")

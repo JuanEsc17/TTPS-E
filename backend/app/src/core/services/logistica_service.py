@@ -10,8 +10,10 @@ from flask import current_app
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from src.clients import OptimizacionClient
 from src.clients.exceptions import ClienteError
-from src.core.models import CentroExtraccion, EstadoEstudio, OrdenDelDia
+from src.core.models import CentroExtraccion, EstadoEstudio, Muestra, OrdenDelDia
 from src.core.repos.logistica_repo import LogisticaRepo
+from src.core.services.excepciones import ErrorConflicto
+from src.core.services.sample_set_service import SampleSetService
 
 LAB_CENTRAL_COORDS = {"lat": -34.921577136619085, "lon": -57.93843617249286}
 
@@ -293,9 +295,18 @@ class LogisticaService:
     def armar_sample_set_para_muestras_recibidas(
         cls,
         muestras_ids: list[int],
+        *,
+        usuario_id: int | None = None,
+        origen: str = "sistema",
+        ahora: datetime | None = None,
     ) -> list[int]:
-        """Hook hacia Escenario 12/14: se completara al implementar SampleSets."""
-        return []
+        """Agrupa las muestras recibidas en SampleSets de hasta 10 unidades (Escenarios 12 y 14)."""
+        return SampleSetService.armar_sample_set_para_muestras_recibidas(
+            muestras_ids,
+            usuario_id=usuario_id,
+            origen=origen,
+            ahora=ahora,
+        )
 
     @classmethod
     def marcar_llegada_lab_central(
@@ -330,6 +341,7 @@ class LogisticaService:
         }
 
         marca_tiempo = ahora or datetime.now()
+        muestras_recibidas: list[Muestra] = []
         muestras_ids: list[int] = []
         estudios_ids: list[int] = []
         try:
@@ -344,15 +356,25 @@ class LogisticaService:
                     if muestra.id in mapa_ml:
                         muestra.mililitros = mapa_ml[muestra.id]
                     muestra.estudio.estado = EstadoEstudio.EN_LAB_CENTRAL
+                    muestras_recibidas.append(muestra)
                     muestras_ids.append(muestra.id)
                     estudios_ids.append(muestra.estudio.id)
 
+            lotes_afectados = SampleSetService.incorporar_muestras_en_tx(
+                muestras_recibidas,
+                usuario_id=usuario_actual_id,
+                origen="usuario",
+                ahora=marca_tiempo,
+            )
             LogisticaRepo.guardar_cambios()
+        except ErrorConflicto as exc:
+            LogisticaRepo.deshacer_cambios()
+            return None, exc.mensaje, exc.http_status
         except SQLAlchemyError as exc:
             LogisticaRepo.deshacer_cambios()
             return None, f"Error al registrar la llegada al laboratorio central: {exc!s}", 500
 
-        sample_sets_ids = cls.armar_sample_set_para_muestras_recibidas(muestras_ids)
+        sample_sets_ids = [lote.id for lote in lotes_afectados]
         return {
             "orden_id": orden.id,
             "llegada_lab_central": marca_tiempo.isoformat(),
