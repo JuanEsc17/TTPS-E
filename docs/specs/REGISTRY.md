@@ -31,7 +31,7 @@
 | 19 | Registrar un paciente sin información familiar | 1.1 | Approved | [escenario-19-registrar-un-paciente-sin-informacion-familiar.md](./escenario-19-registrar-un-paciente-sin-informacion-familiar.md) |
 | 20 | Cambiar la contraseña inicial | 1.0 | Approved | [escenario-20-cambiar-la-contrasena-inicial.md](./escenario-20-cambiar-la-contrasena-inicial.md) |
 | 21 | Registrar un médico | 1.0 | Approved | [escenario-21-registrar-un-medico.md](./escenario-21-registrar-un-medico.md) |
-| 22 | Registrar un administrativo | 1.0 | Approved | [escenario-22-registrar-un-administrativo.md](./escenario-22-registrar-un-administrativo.md) |
+| 22 | Registrar un administrativo | 2.0 | Approved | [escenario-22-registrar-un-administrativo.md](./escenario-22-registrar-un-administrativo.md) |
 | 23 | Gestionar una patología | 1.0 | Approved | [escenario-23-gestionar-una-patologia.md](./escenario-23-gestionar-una-patologia.md) |
 | 24 | Consultar variantes | 1.0 | Approved | [escenario-24-consultar-variantes.md](./escenario-24-consultar-variantes.md) |
 | 25 | Consultar el chatbot sobre patologías | 1.0 | Approved | [escenario-25-consultar-el-chatbot-sobre-patologias.md](./escenario-25-consultar-el-chatbot-sobre-patologias.md) |
@@ -82,7 +82,7 @@
 |---|---|
 | **Médico** | Alta (`21`), login/2FA (`26`, `27`, `20`, `34`, `28`) → Consulta catálogo (`25`), da de alta `Paciente` con síntomas SNOMED (`01`, `36`), historia clínica grabada (`35`) y familiograma (`18`, `19`) → Solicita `Estudio` (`02`) → Revisa diagnóstico vinculado de familiares X <-> X' (`41`) y resultados (`16`, `37`) → Pide reanálisis (`17`) y monitorea agenda anual VUS (`43`) → Audita historial clínico autorizado (`40`, `42`). |
 | **Paciente** | Recibe alta y cambia contraseña (`20`, `26`, `27`, `34`, `28`) → Paga en 1 pago o cuotas con MercadoPago (`06`, `38`) aplicando cupón (`30`), o gestiona demanda OS (`04`, `05`) → Otorga/revoca autorización de historia clínica a múltiples médicos (`40`) → Saca/cancela/reprograma turnos (`07`, `08`, `33`) → Sigue muestra (`32`) y remuestrea sin costo ante baja calidad en Corea (`10`) → Descarga resultado y recibe alerta anual VUS (`37`, `43`). |
-| **Personal administrativo** | Alta (`22`) → Emite presupuesto (`03`), valida OS (`04`) y monitorea cuotas MercadoPago pendientes/vencidas (`39`) → Administra `SampleSet` y envíos a Corea (`12`, `13`, `14`) → Ejecuta rollback de remuestreo desde `EN_VIAJE_COREA` por baja calidad en Corea (`10`) → Carga datos crudos (`15`) → Consulta auditoría completa (`42`). |
+| **Personal administrativo** | Alta por admin general (`22`) → Emite presupuesto (`03`), valida OS (`04`) y monitorea cuotas MercadoPago pendientes/vencidas (`39`) → Administra `SampleSet` y envíos a Corea (`12`, `13`, `14`) → Ejecuta rollback de remuestreo desde `EN_VIAJE_COREA` por baja calidad en Corea (`10`) → Carga datos crudos (`15`) → Consulta auditoría completa (`42`). |
 | **Transportista** | Login (`27`) → Ejecuta orden diaria provincial de centros de extracción y traslada muestras al laboratorio central reportando ruta (`11`, `32`). |
 | **Bioinformático** | Toma estudios priorizando `Pompe urgente` (`15`), consulta variantes (`24`), registra análisis o reanálisis (`16`, `17`) determinando diagnóstico `positivo | negativo | vus` (con fecha anual automática en `vus`). |
 | **Gerente médico** | Alta (`31`) → Gestiona patologías/genes/síntomas (`23`), emite y asigna cupones (`29`, `30`) → Supervisa auditoría de modificaciones (`42`), seguimiento VUS (`43`) y estudios clínicos (`37`, `41`). |

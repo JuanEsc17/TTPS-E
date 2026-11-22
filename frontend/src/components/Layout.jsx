@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { NavLink, Navigate, Outlet, useLocation } from "react-router-dom";
+import CampanaAvisos from "./CampanaAvisos";
 import FondoAdn from "./FondoAdn";
 import LogoAdn from "./LogoAdn";
 
@@ -15,14 +16,19 @@ const MENU_POR_ROL = {
         { to: "/medico/pacientes", label: "Pacientes" },
         { to: "/medico/pacientes/nuevo", label: "Alta de paciente" },
     ],
-    gerente_medico: [{ to: "/gerencia/patologias", label: "Patologías" }],
+    gerente_medico: [
+        { to: "/gerencia/patologias", label: "Patologías" },
+        { to: "/medico/estudios", label: "Estudios" },
+    ],
     administrativo: [
         { to: "/administracion/muestras", label: "Registro de muestras" },
-        { to: "/administracion/estudios", label: "Carga de datos ACTG" },
-    ],
+        { to: "/administracion/estudios", label: "Carga de datos ACTG" }],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],
     transportista: [{ to: "/transporte/orden-del-dia", label: "Orden diaria" }],
-    admin_general: [{ to: "/admin/dashboard", label: "Panel general" }],
+    admin_general: [
+        { to: "/admin/dashboard", label: "Panel general" },
+        { to: "/admin/gerentes-medicos/nuevo", label: "Alta gerente médico" },
+    ],
 };
 
 const ETIQUETA_ROL = {
@@ -65,9 +71,11 @@ export default function Layout({ sesion, onCerrarSesion }) {
     const itemActivo =
         pathname === "/cambiar-password"
             ? "Cambiar contraseña"
-            : pathname.endsWith("/turno")
-                ? "Turno de extracción"
-                : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
+            : pathname.endsWith("/resultado")
+                ? "Resultado del estudio"
+                : pathname.endsWith("/turno")
+                    ? "Turno de extracción"
+                    : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
 
     const contenidoSidebar = (
         <div className="relative flex h-full flex-col justify-between overflow-hidden bg-gradient-to-b from-[#062846] via-[#093D6B] to-[#0B4F8A] p-4 text-white">
@@ -164,7 +172,7 @@ export default function Layout({ sesion, onCerrarSesion }) {
             )}
 
             <div className="flex min-w-0 flex-1 flex-col">
-                <header className="mx-auto w-full max-w-6xl px-4 pt-4 sm:px-8">
+                <header className="relative z-20 mx-auto w-full max-w-6xl px-4 pt-4 sm:px-8">
                     <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-xs backdrop-blur-md">
                         <div className="flex items-center gap-3">
                             <button
@@ -191,6 +199,7 @@ export default function Layout({ sesion, onCerrarSesion }) {
                         </div>
 
                         <div className="flex items-center gap-3">
+                            <CampanaAvisos sesion={sesion} />
                             <div className="text-right leading-tight">
                                 <span className="block text-xs font-semibold text-slate-800">
                                     {usuario?.nombre} {usuario?.apellido}

@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
-    consultarVariantesGenRequest,
+    consultarVariantesEstudioRequest,
     listarBandejaBioinformaticaRequest,
     obtenerDatosCrudosEstudioRequest,
     registrarVariantesAnalisisRequest,
     tomarEstudioBioinformaticaRequest,
 } from "../api/bioinformatica";
+import { descargarResultadoPdfRequest } from "../api/resultados";
 
 const BADGE_CLASIFICACION = {
     patogenica: {
@@ -44,15 +46,18 @@ export default function BioinformaticaPage({ sesion }) {
     const [estudioActivo, setEstudioActivo] = useState(null);
     const [datosCrudos, setDatosCrudos] = useState(null);
     const [genSeleccionado, setGenSeleccionado] = useState(null);
+    const [genDetalle, setGenDetalle] = useState(null);
     const [filtroNotation, setFiltroNotation] = useState("");
     const [filtroClasificacion, setFiltroClasificacion] = useState("");
     const [variantesGen, setVariantesGen] = useState([]);
-    const [avisoCache, setAvisoCache] = useState("");
+    const [fuenteVariantes, setFuenteVariantes] = useState("");
     const [cargandoVariantes, setCargandoVariantes] = useState(false);
+    const abortVariantesRef = useRef(null);
 
     const [seleccionadas, setSeleccionadas] = useState({});
     const [confirmarSinVariantes, setConfirmarSinVariantes] = useState(false);
     const [guardandoAnalisis, setGuardandoAnalisis] = useState(false);
+    const [descargandoPdf, setDescargandoPdf] = useState(false);
     const [error, setError] = useState("");
     const [errorVariantes, setErrorVariantes] = useState(null);
     const [resultadoFinal, setResultadoFinal] = useState(null);
@@ -91,34 +96,48 @@ export default function BioinformaticaPage({ sesion }) {
         };
     }, [token, esBioinformatico]);
 
+    useEffect(() => {
+        return () => abortVariantesRef.current?.abort();
+    }, []);
+
     const cargarVariantes = useCallback(
-        async (gen, { q = "", clasificacion = "" } = {}) => {
-            if (!token || !gen) return;
+        async (estudioId, gen, { q = "", clasificacion = "" } = {}) => {
+            if (!token || !estudioId || !gen) return;
+            abortVariantesRef.current?.abort();
+            const controller = new AbortController();
+            abortVariantesRef.current = controller;
+
             setCargandoVariantes(true);
             setErrorVariantes(null);
-            setAvisoCache("");
+            setFuenteVariantes("");
+            setGenDetalle(gen);
             try {
-                const data = await consultarVariantesGenRequest({
+                const data = await consultarVariantesEstudioRequest({
                     token,
+                    estudioId,
                     genId: gen.gen_id,
                     q,
                     clasificacion,
+                    signal: controller.signal,
                 });
+                if (controller.signal.aborted) return;
                 setVariantesGen(data.variantes || []);
-                if (data.warning === "USANDO_CATALOGO_LOCAL_CACHEADO") {
-                    setAvisoCache(
-                        "La API de bioinformática no respondió; se muestran variantes cacheadas localmente."
-                    );
-                }
+                setFuenteVariantes(data.fuente || "");
+                setGenDetalle(data.gen || gen);
             } catch (err) {
+                if (err?.name === "AbortError") return;
                 setVariantesGen([]);
+                setFuenteVariantes("");
                 setErrorVariantes({
                     mensaje: err.message,
                     retryable: Boolean(err.retryable),
+                    estudioId,
                     gen,
                 });
             } finally {
-                setCargandoVariantes(false);
+                if (abortVariantesRef.current === controller) {
+                    setCargandoVariantes(false);
+                }
             }
         },
         [token]
@@ -126,11 +145,15 @@ export default function BioinformaticaPage({ sesion }) {
 
     const abrirEspacioTrabajo = useCallback(
         async (estudioData) => {
+            abortVariantesRef.current?.abort();
             setEstudioActivo(estudioData);
             setSeleccionadas({});
             setConfirmarSinVariantes(false);
             setVariantesGen([]);
-            setAvisoCache("");
+            setFuenteVariantes("");
+            setGenDetalle(null);
+            setFiltroNotation("");
+            setFiltroClasificacion("");
             setErrorVariantes(null);
             setResultadoFinal(null);
             setDatosCrudos(null);
@@ -149,7 +172,10 @@ export default function BioinformaticaPage({ sesion }) {
             }
 
             if (primerGen) {
-                await cargarVariantes(primerGen, { q: "", clasificacion: "" });
+                await cargarVariantes(estudioData.estudio_id, primerGen, {
+                    q: "",
+                    clasificacion: "",
+                });
             }
         },
         [token, cargarVariantes]
@@ -182,10 +208,10 @@ export default function BioinformaticaPage({ sesion }) {
         setConfirmarSinVariantes(false);
         setSeleccionadas((prev) => {
             const copia = { ...prev };
-            if (copia[variante.id]) {
-                delete copia[variante.id];
+            if (copia[variante.variante_id]) {
+                delete copia[variante.variante_id];
             } else {
-                copia[variante.id] = { ...variante, gen_simbolo: genSimbolo };
+                copia[variante.variante_id] = { ...variante, gen_simbolo: genSimbolo };
             }
             return copia;
         });
@@ -217,7 +243,7 @@ export default function BioinformaticaPage({ sesion }) {
         if (!estudioActivo) return;
         setError("");
 
-        const ids = listaSeleccionadas.map((v) => v.id);
+        const ids = listaSeleccionadas.map((v) => v.variante_id);
         if (ids.length === 0 && !confirmarSinVariantes) {
             setError("Seleccioná al menos una variante o confirmá que no se encontraron variantes.");
             return;
@@ -239,6 +265,22 @@ export default function BioinformaticaPage({ sesion }) {
             setError(err.message);
         } finally {
             setGuardandoAnalisis(false);
+        }
+    }
+
+    async function handleDescargarResultadoFinal() {
+        if (!token || !resultadoFinal?.estudio_id) return;
+        setDescargandoPdf(true);
+        setError("");
+        try {
+            await descargarResultadoPdfRequest({
+                token,
+                estudioId: resultadoFinal.estudio_id,
+            });
+        } catch (err) {
+            setError(err.message);
+        } finally {
+            setDescargandoPdf(false);
         }
     }
 
@@ -286,19 +328,37 @@ export default function BioinformaticaPage({ sesion }) {
             {resultadoFinal && (
                 <div
                     role="status"
-                    className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900"
+                    className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-xs text-emerald-900"
                 >
-                    <p className="text-sm font-semibold">
-                        Análisis bioinformático registrado · Estudio #{resultadoFinal.estudio_id} ({resultadoFinal.estado_estudio})
-                    </p>
-                    <p className="mt-1">
-                        Diagnóstico: <strong className="uppercase">{resultadoFinal.resultado?.diagnostico}</strong> · Variantes registradas: {resultadoFinal.variantes_registradas?.length || 0} · PDF: <code className="font-mono">{resultadoFinal.resultado?.pdf_path}</code>
-                    </p>
-                    {resultadoFinal.resultado?.fecha_proximo_estudio && (
-                        <p className="mt-1 font-medium text-amber-900">
-                            Reevaluación anual por VUS programada para: {resultadoFinal.resultado.fecha_proximo_estudio}
+                    <div>
+                        <p className="text-sm font-semibold">
+                            Resultado informado · Estudio #{resultadoFinal.estudio_id} ({resultadoFinal.estado_estudio})
                         </p>
-                    )}
+                        <p className="mt-1">
+                            Diagnóstico: <strong className="uppercase">{resultadoFinal.resultado?.diagnostico}</strong> · Variantes registradas: {resultadoFinal.variantes_registradas?.length || 0} · Se notificó al paciente y al médico tratante.
+                        </p>
+                        {resultadoFinal.resultado?.fecha_proximo_estudio && (
+                            <p className="mt-1 font-medium text-amber-900">
+                                Reevaluación anual por VUS programada para: {resultadoFinal.resultado.fecha_proximo_estudio}
+                            </p>
+                        )}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Link
+                            to={`/estudios/${resultadoFinal.estudio_id}/resultado`}
+                            className="rounded-xl bg-[#0B4F8A] px-3.5 py-2 font-semibold text-white transition hover:bg-[#093E6D]"
+                        >
+                            Ver resultado
+                        </Link>
+                        <button
+                            type="button"
+                            disabled={descargandoPdf}
+                            onClick={handleDescargarResultadoFinal}
+                            className="rounded-xl border border-emerald-700 bg-white px-3.5 py-2 font-semibold text-emerald-800 transition hover:bg-emerald-100 disabled:opacity-50"
+                        >
+                            {descargandoPdf ? "Descargando..." : "Descargar PDF"}
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -331,15 +391,22 @@ export default function BioinformaticaPage({ sesion }) {
                                                 : "border-slate-200 bg-white"
                                         }`}
                                     >
-                                        <div className="flex items-center justify-between gap-2">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
                                             <span className="text-sm font-semibold text-slate-900">
                                                 Estudio #{est.estudio_id}
                                             </span>
-                                            {est.es_pompe_urgente && (
-                                                <span className="rounded-full border border-red-200 bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
-                                                    Pompe urgente
-                                                </span>
-                                            )}
+                                            <div className="flex items-center gap-1.5">
+                                                {est.tipo_analisis === "reanalisis" && (
+                                                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700">
+                                                        Reanálisis
+                                                    </span>
+                                                )}
+                                                {est.es_pompe_urgente && (
+                                                    <span className="rounded-full border border-red-200 bg-red-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
+                                                        Pompe urgente
+                                                    </span>
+                                                )}
+                                            </div>
                                         </div>
                                         <p className="mt-1 text-xs font-medium text-slate-700">
                                             {est.patologia_nombre} · {est.tipo_analisis === "reanalisis" ? "Reanálisis" : "Inicial"}
@@ -467,23 +534,28 @@ export default function BioinformaticaPage({ sesion }) {
                                 <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-700">
                                     1. Seleccioná un gen del estudio para consultar variantes
                                 </h3>
-                                <div className="mt-2.5 flex flex-wrap gap-2">
+                                <div
+                                    role="group"
+                                    aria-label="Genes del estudio"
+                                    className="mt-2.5 flex flex-wrap gap-2"
+                                >
                                     {(estudioActivo.genes || []).map((gen) => {
                                         const activo = genSeleccionado?.gen_id === gen.gen_id;
                                         return (
                                             <button
                                                 key={gen.gen_id}
                                                 type="button"
+                                                aria-pressed={activo}
                                                 onClick={() => {
                                                     setGenSeleccionado(gen);
                                                     setFiltroNotation("");
                                                     setFiltroClasificacion("");
-                                                    cargarVariantes(gen, {
+                                                    cargarVariantes(estudioActivo.estudio_id, gen, {
                                                         q: "",
                                                         clasificacion: "",
                                                     });
                                                 }}
-                                                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition ${
+                                                className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-1 ${
                                                     activo
                                                         ? "border-[#0B4F8A] bg-[#0B4F8A] text-white"
                                                         : "border-slate-200 bg-white text-slate-800 hover:border-[#0B4F8A]/50 hover:bg-[#EAF2FA]/50"
@@ -500,7 +572,37 @@ export default function BioinformaticaPage({ sesion }) {
                             </div>
 
                             {genSeleccionado && (
-                                <div className="space-y-3 rounded-xl border border-slate-200/80 bg-[#F8FAFC] p-4">
+                                <div
+                                    aria-busy={cargandoVariantes}
+                                    className="space-y-3 rounded-xl border border-slate-200/80 bg-[#F8FAFC] p-4"
+                                >
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                            <p className="text-xs font-semibold text-slate-900">
+                                                Gen <span className="font-mono">{genDetalle?.simbolo || genSeleccionado.simbolo}</span>
+                                                {(genDetalle?.nombre || genSeleccionado.nombre) && (
+                                                    <span className="font-normal text-slate-600">
+                                                        {" "}· {genDetalle?.nombre || genSeleccionado.nombre}
+                                                    </span>
+                                                )}
+                                            </p>
+                                        </div>
+                                        {!cargandoVariantes && fuenteVariantes && (
+                                            <span
+                                                className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${
+                                                    fuenteVariantes === "cache_local_contingencia"
+                                                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                                                        : "border-slate-200 bg-white text-slate-600"
+                                                }`}
+                                            >
+                                                {variantesGen.length} {variantesGen.length === 1 ? "variante" : "variantes"} ·{" "}
+                                                {fuenteVariantes === "cache_local_contingencia"
+                                                    ? "Caché local (contingencia)"
+                                                    : "API de bioinformática"}
+                                            </span>
+                                        )}
+                                    </div>
+
                                     <div className="flex flex-wrap items-end gap-3">
                                         <div className="min-w-[11rem] flex-1">
                                             <label htmlFor="buscar-variante-hgvs" className="mb-1 block text-[11px] font-medium text-slate-600">
@@ -511,6 +613,15 @@ export default function BioinformaticaPage({ sesion }) {
                                                 type="search"
                                                 value={filtroNotation}
                                                 onChange={(e) => setFiltroNotation(e.target.value)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.preventDefault();
+                                                        cargarVariantes(estudioActivo.estudio_id, genSeleccionado, {
+                                                            q: filtroNotation,
+                                                            clasificacion: filtroClasificacion,
+                                                        });
+                                                    }
+                                                }}
                                                 placeholder="Ej: c.1935"
                                                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 focus:border-[#0B4F8A] focus:outline-none"
                                             />
@@ -522,7 +633,14 @@ export default function BioinformaticaPage({ sesion }) {
                                             <select
                                                 id="filtro-clasificacion"
                                                 value={filtroClasificacion}
-                                                onChange={(e) => setFiltroClasificacion(e.target.value)}
+                                                onChange={(e) => {
+                                                    const nueva = e.target.value;
+                                                    setFiltroClasificacion(nueva);
+                                                    cargarVariantes(estudioActivo.estudio_id, genSeleccionado, {
+                                                        q: filtroNotation,
+                                                        clasificacion: nueva,
+                                                    });
+                                                }}
                                                 className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-900 focus:border-[#0B4F8A] focus:outline-none"
                                             >
                                                 <option value="">Todas</option>
@@ -536,7 +654,7 @@ export default function BioinformaticaPage({ sesion }) {
                                             type="button"
                                             disabled={cargandoVariantes}
                                             onClick={() =>
-                                                cargarVariantes(genSeleccionado, {
+                                                cargarVariantes(estudioActivo.estudio_id, genSeleccionado, {
                                                     q: filtroNotation,
                                                     clasificacion: filtroClasificacion,
                                                 })
@@ -547,71 +665,103 @@ export default function BioinformaticaPage({ sesion }) {
                                         </button>
                                     </div>
 
-                                    {avisoCache && (
+                                    {fuenteVariantes === "cache_local_contingencia" && (
                                         <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                                            {avisoCache}
+                                            La API de bioinformática no respondió; se muestran variantes cacheadas localmente (contingencia).
                                         </div>
                                     )}
 
                                     {errorVariantes && (
-                                        <div role="alert" className="flex items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                                        <div role="alert" className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
                                             <span>{errorVariantes.mensaje}</span>
                                             {errorVariantes.retryable && (
                                                 <button
                                                     type="button"
                                                     onClick={() =>
-                                                        cargarVariantes(errorVariantes.gen, {
+                                                        cargarVariantes(errorVariantes.estudioId, errorVariantes.gen, {
                                                             q: filtroNotation,
                                                             clasificacion: filtroClasificacion,
                                                         })
                                                     }
                                                     className="shrink-0 rounded-md border border-red-300 bg-white px-2.5 py-1 font-semibold text-red-700 hover:bg-red-100"
                                                 >
-                                                    Reintentar
+                                                    Reintentar consulta de variantes
                                                 </button>
                                             )}
                                         </div>
                                     )}
 
                                     {cargandoVariantes ? (
-                                        <p className="text-xs text-slate-500">Consultando variantes conocidas de {genSeleccionado.simbolo}...</p>
-                                    ) : variantesGen.length === 0 && !errorVariantes ? (
+                                        <div
+                                            role="status"
+                                            aria-live="polite"
+                                            className="flex items-center gap-2 py-2 text-xs text-slate-600"
+                                        >
+                                            <span
+                                                aria-hidden="true"
+                                                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-[#0B4F8A] border-t-transparent"
+                                            />
+                                            <span>
+                                                Consultando base bioinformática de variantes para {genSeleccionado.simbolo}...
+                                            </span>
+                                        </div>
+                                    ) : errorVariantes ? null : variantesGen.length === 0 ? (
                                         <p className="text-xs text-slate-500">No se encontraron variantes para los filtros indicados.</p>
                                     ) : (
-                                        <ul className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
-                                            {variantesGen.map((v) => {
-                                                const marcada = Boolean(seleccionadas[v.id]);
-                                                const badge = BADGE_CLASIFICACION[v.clasificacion] || {
-                                                    texto: v.clasificacion,
-                                                    clase: "border-slate-200 bg-slate-100 text-slate-700",
-                                                };
-                                                return (
-                                                    <li key={v.id}>
-                                                        <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs hover:bg-[#EAF2FA]/40">
-                                                            <span className="flex items-center gap-2.5">
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={marcada}
-                                                                    onChange={() => toggleVariante(v, genSeleccionado.simbolo)}
-                                                                    className="h-4 w-4 rounded border-slate-300 text-[#0B4F8A] focus:ring-[#0B4F8A]"
-                                                                />
-                                                                <span className="font-mono font-semibold text-slate-900">
-                                                                    {v.notacion}
-                                                                </span>
-                                                                {v.clinvar_id && (
-                                                                    <span className="font-mono text-[11px] text-slate-500">
-                                                                        {v.clinvar_id}
+                                        <div className="max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                                            <table className="w-full border-collapse text-left text-xs">
+                                                <thead className="sticky top-0 border-b border-slate-200 bg-slate-50 text-[11px] font-semibold text-slate-600">
+                                                    <tr>
+                                                        <th scope="col" className="w-10 px-3 py-2">
+                                                            <span className="sr-only">Seleccionar</span>
+                                                        </th>
+                                                        <th scope="col" className="px-2 py-2">Notación</th>
+                                                        <th scope="col" className="px-2 py-2">ClinVar</th>
+                                                        <th scope="col" className="px-3 py-2 text-right">Clasificación</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody className="divide-y divide-slate-100">
+                                                    {variantesGen.map((v) => {
+                                                        const checkboxId = `variante-${v.variante_id}`;
+                                                        const marcada = Boolean(seleccionadas[v.variante_id]);
+                                                        const badge = BADGE_CLASIFICACION[v.clasificacion] || {
+                                                            texto: v.clasificacion,
+                                                            clase: "border-slate-200 bg-slate-100 text-slate-700",
+                                                        };
+                                                        return (
+                                                            <tr
+                                                                key={v.variante_id}
+                                                                className={marcada ? "bg-[#EAF2FA]/50" : "hover:bg-slate-50"}
+                                                            >
+                                                                <td className="px-3 py-2">
+                                                                    <input
+                                                                        id={checkboxId}
+                                                                        type="checkbox"
+                                                                        aria-label={`Seleccionar variante ${v.notacion} (${badge.texto})`}
+                                                                        checked={marcada}
+                                                                        onChange={() => toggleVariante(v, genSeleccionado.simbolo)}
+                                                                        className="h-4 w-4 cursor-pointer rounded border-slate-300 text-[#0B4F8A] focus:ring-[#0B4F8A]"
+                                                                    />
+                                                                </td>
+                                                                <td className="px-2 py-2 font-mono font-semibold text-slate-900">
+                                                                    <label htmlFor={checkboxId} className="block cursor-pointer">
+                                                                        {v.notacion}
+                                                                    </label>
+                                                                </td>
+                                                                <td className="px-2 py-2 font-mono text-[11px] text-slate-500">
+                                                                    {v.clinvar_id || "—"}
+                                                                </td>
+                                                                <td className="px-3 py-2 text-right">
+                                                                    <span className={`inline-block rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${badge.clase}`}>
+                                                                        {badge.texto}
                                                                     </span>
-                                                                )}
-                                                            </span>
-                                                            <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-semibold ${badge.clase}`}>
-                                                                {badge.texto}
-                                                            </span>
-                                                        </label>
-                                                    </li>
-                                                );
-                                            })}
-                                        </ul>
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
                                     )}
                                 </div>
                             )}
@@ -629,7 +779,7 @@ export default function BioinformaticaPage({ sesion }) {
                                             const badge = BADGE_CLASIFICACION[v.clasificacion] || BADGE_CLASIFICACION.inocua;
                                             return (
                                                 <li
-                                                    key={v.id}
+                                                    key={v.variante_id}
                                                     className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs"
                                                 >
                                                     <span className="font-mono font-semibold text-slate-900">
@@ -672,7 +822,7 @@ export default function BioinformaticaPage({ sesion }) {
                                         disabled={guardandoAnalisis}
                                         className="inline-flex items-center justify-center rounded-xl bg-[#0B4F8A] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-[#093E6D] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] focus-visible:ring-offset-2 disabled:opacity-50"
                                     >
-                                        {guardandoAnalisis ? "Registrando análisis..." : "Confirmar análisis y cargar resultado"}
+                                        {guardandoAnalisis ? "Generando informe PDF del resultado..." : "Confirmar análisis y cargar resultado"}
                                     </button>
                                 </div>
                             </div>
