@@ -1,15 +1,15 @@
-"""Repositorio para el registro y seguimiento de toma de muestras (Escenario 9)."""
+"""Repositorio para el registro de toma de muestras y remuestreo (Escenarios 9 y 10)."""
 from __future__ import annotations
 
 from datetime import date, datetime, time
 
 from sqlalchemy import select
-from sqlalchemy.orm import contains_eager, joinedload
+from sqlalchemy.orm import contains_eager, joinedload, selectinload
 from src.core.database import db
 from src.core.models.enums import CanalAviso, EstadoEstudio
 from src.core.models.estudios import Estudio
 from src.core.models.logistica import Muestra
-from src.core.models.perfiles import Paciente
+from src.core.models.perfiles import Medico, Paciente
 from src.core.models.turnos import Turno
 from src.core.models.usuarios import Aviso
 
@@ -118,6 +118,71 @@ class MuestraRepo:
         db.session.add(aviso)
         db.session.flush()
         return aviso
+
+    @staticmethod
+    def obtener_estudio_para_remuestreo(
+        estudio_id: int,
+        bloquear: bool = True,
+    ) -> Estudio | None:
+        """Obtiene un estudio con paciente, medico y muestras (con lock opcional)."""
+        stmt = (
+            select(Estudio)
+            .options(
+                joinedload(Estudio.paciente).joinedload(Paciente.usuario),
+                joinedload(Estudio.medico).joinedload(Medico.usuario),
+                joinedload(Estudio.patologia_sospechada),
+                selectinload(Estudio.muestras),
+            )
+            .where(Estudio.id == estudio_id)
+        )
+        if bloquear:
+            stmt = stmt.with_for_update(of=[Estudio])
+        return db.session.execute(stmt).unique().scalars().first()
+
+    @staticmethod
+    def listar_estudios_remuestreables(
+        estados_permitidos: tuple[EstadoEstudio, ...],
+        dni: str | None = None,
+        estudio_id: int | None = None,
+        estado: EstadoEstudio | None = None,
+    ) -> list[Estudio]:
+        """Lista estudios en estados elegibles que poseen una muestra vigente sin descartar."""
+        tiene_muestra_vigente = (
+            select(Muestra.id)
+            .where(
+                Muestra.estudio_id == Estudio.id,
+                Muestra.motivo_descarte.is_(None),
+            )
+            .exists()
+        )
+        stmt = (
+            select(Estudio)
+            .join(Estudio.paciente)
+            .options(
+                contains_eager(Estudio.paciente).joinedload(Paciente.usuario),
+                joinedload(Estudio.medico).joinedload(Medico.usuario),
+                joinedload(Estudio.patologia_sospechada),
+                selectinload(Estudio.muestras),
+            )
+            .where(
+                Estudio.estado.in_(estados_permitidos),
+                tiene_muestra_vigente,
+            )
+        )
+
+        if dni:
+            stmt = stmt.where(Paciente.dni == dni.strip())
+        if estudio_id is not None:
+            stmt = stmt.where(Estudio.id == estudio_id)
+        if estado is not None:
+            stmt = stmt.where(Estudio.estado == estado)
+
+        stmt = stmt.order_by(
+            Estudio.es_pompe_urgente.desc(),
+            Estudio.updated_at.asc(),
+            Estudio.id.asc(),
+        )
+        return list(db.session.execute(stmt).unique().scalars().all())
 
     @staticmethod
     def guardar_cambios() -> None:

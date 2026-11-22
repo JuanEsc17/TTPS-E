@@ -1,8 +1,17 @@
-"""Funciones de validacion para solicitudes de toma de muestras (Escenario 9)."""
+"""Funciones de validacion para solicitudes de toma de muestras y remuestreo (Escenarios 9 y 10)."""
 from __future__ import annotations
 
 from datetime import date, datetime
 from typing import Any
+
+from src.core.models.enums import EstadoEstudio, MotivoDescarte
+from src.core.services.excepciones import ErrorDatosInvalidos
+
+ESTADOS_REMUESTREABLES: tuple[EstadoEstudio, ...] = (
+    EstadoEstudio.EN_VIAJE_COREA,
+    EstadoEstudio.EN_LAB_CENTRAL,
+    EstadoEstudio.EN_ESPERA_RETIRO,
+)
 
 
 def _parsear_entero_positivo(valor_raw: Any, nombre_campo: str) -> tuple[int | None, str | None]:
@@ -81,3 +90,86 @@ def validar_registrar_toma_muestra(
             tomada_en = tomada_en.replace(tzinfo=None)
 
     return {"tomada_en": tomada_en}, None
+
+
+def validar_filtros_remuestreables(args: Any) -> dict[str, Any]:
+    """Valida los filtros para listar estudios elegibles para remuestreo (Escenario 10)."""
+    dni_raw = args.get("dni") if hasattr(args, "get") else None
+    dni = str(dni_raw).strip() if dni_raw is not None and str(dni_raw).strip() else None
+
+    estudio_id, error = _parsear_entero_positivo(
+        args.get("estudio_id") if hasattr(args, "get") else None,
+        "estudio_id",
+    )
+    if error:
+        raise ErrorDatosInvalidos(error)
+
+    estado_obj: EstadoEstudio | None = None
+    estado_raw = args.get("estado") if hasattr(args, "get") else None
+    if estado_raw is not None and str(estado_raw).strip():
+        estado_str = str(estado_raw).strip()
+        mapa_estados = {e.value: e for e in ESTADOS_REMUESTREABLES}
+        estado_obj = mapa_estados.get(estado_str)
+        if estado_obj is None:
+            valores = ", ".join(e.value for e in ESTADOS_REMUESTREABLES)
+            raise ErrorDatosInvalidos(
+                f"El parametro 'estado' debe ser uno de: {valores}.",
+                codigo="ESTADO_FILTRO_INVALIDO",
+            )
+
+    return {
+        "dni": dni,
+        "estudio_id": estudio_id,
+        "estado": estado_obj,
+    }
+
+
+def validar_remuestreo_estudio(payload: Any) -> dict[str, Any]:
+    """Valida el cuerpo JSON para declarar el remuestreo de un estudio (Escenario 10 / ADR-004)."""
+    if not isinstance(payload, dict):
+        raise ErrorDatosInvalidos("El cuerpo de la solicitud debe ser un objeto JSON valido.")
+
+    motivo_descarte_raw = payload.get("motivo_descarte")
+    if not isinstance(motivo_descarte_raw, str) or not motivo_descarte_raw.strip():
+        raise ErrorDatosInvalidos(
+            "El campo 'motivo_descarte' es obligatorio.",
+            codigo="MOTIVO_DESCARTE_REQUERIDO",
+        )
+
+    motivo_descarte_norm = motivo_descarte_raw.strip().lower()
+    try:
+        motivo_descarte = MotivoDescarte(motivo_descarte_norm)
+    except ValueError as exc:
+        validos = ", ".join(m.value for m in MotivoDescarte)
+        raise ErrorDatosInvalidos(
+            f"El campo 'motivo_descarte' es invalido. Valores permitidos: {validos}.",
+            codigo="MOTIVO_DESCARTE_INVALIDO",
+        ) from exc
+
+    motivo_raw = payload.get("motivo")
+    if not isinstance(motivo_raw, str) or not motivo_raw.strip():
+        raise ErrorDatosInvalidos(
+            "El campo 'motivo' es obligatorio.",
+            codigo="MOTIVO_REQUERIDO",
+        )
+    motivo = motivo_raw.strip()
+    if len(motivo) > 500:
+        raise ErrorDatosInvalidos("El campo 'motivo' no puede superar los 500 caracteres.")
+
+    obs_raw = payload.get("observaciones_calidad")
+    observaciones_calidad: str | None = None
+    if obs_raw is not None:
+        if not isinstance(obs_raw, str):
+            raise ErrorDatosInvalidos("El campo 'observaciones_calidad' debe ser texto.")
+        limpio = obs_raw.strip()
+        if len(limpio) > 500:
+            raise ErrorDatosInvalidos(
+                "El campo 'observaciones_calidad' no puede superar los 500 caracteres."
+            )
+        observaciones_calidad = limpio or None
+
+    return {
+        "motivo_descarte": motivo_descarte,
+        "observaciones_calidad": observaciones_calidad,
+        "motivo": motivo,
+    }
