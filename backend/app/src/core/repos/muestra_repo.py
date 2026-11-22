@@ -144,7 +144,6 @@ class MuestraRepo:
         estados_permitidos: tuple[EstadoEstudio, ...],
         dni: str | None = None,
         estudio_id: int | None = None,
-        estado: EstadoEstudio | None = None,
     ) -> list[Estudio]:
         """Lista estudios en estados elegibles que poseen una muestra vigente sin descartar."""
         tiene_muestra_vigente = (
@@ -174,8 +173,6 @@ class MuestraRepo:
             stmt = stmt.where(Paciente.dni == dni.strip())
         if estudio_id is not None:
             stmt = stmt.where(Estudio.id == estudio_id)
-        if estado is not None:
-            stmt = stmt.where(Estudio.estado == estado)
 
         stmt = stmt.order_by(
             Estudio.es_pompe_urgente.desc(),

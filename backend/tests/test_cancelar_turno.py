@@ -234,7 +234,7 @@ def test_cancelar_turno_estudio_en_remuestreo_vuelve_a_remuestreo_requerido(
     turno = datos_cancelacion["turno"]
     muestra_descartada = Muestra(
         estudio_id=estudio.id,
-        motivo_descarte=MotivoDescarte.BAJA_CALIDAD,
+        motivo_descarte=MotivoDescarte.ADN_INSUFICIENTE,
     )
     session.add(muestra_descartada)
     session.commit()

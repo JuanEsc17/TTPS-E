@@ -63,7 +63,6 @@ def listar_estudios_remuestreables() -> tuple[Any, int]:
     resultado = MuestraService.listar_estudios_remuestreables(
         dni=filtros["dni"],
         estudio_id=filtros["estudio_id"],
-        estado=filtros["estado"],
     )
     return jsonify({"ok": True, "data": resultado}), 200
 

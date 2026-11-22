@@ -29,14 +29,9 @@ from src.core.services.formato_correo import asunto_correo, formatear_correo
 
 logger = logging.getLogger(__name__)
 
-ESTADOS_APTOS_REMUESTREO: tuple[EstadoEstudio, ...] = (
-    EstadoEstudio.EN_VIAJE_COREA,
-    EstadoEstudio.EN_LAB_CENTRAL,
-    EstadoEstudio.EN_ESPERA_RETIRO,
-)
+ESTADOS_APTOS_REMUESTREO: tuple[EstadoEstudio, ...] = (EstadoEstudio.EN_VIAJE_COREA,)
 
 _ETIQUETA_MOTIVO_DESCARTE: dict[MotivoDescarte, str] = {
-    MotivoDescarte.BAJA_CALIDAD: "Baja calidad reportada por laboratorio",
     MotivoDescarte.ADN_INSUFICIENTE: "ADN insuficiente",
     MotivoDescarte.DESNATURALIZADA: "Muestra desnaturalizada",
 }
@@ -215,14 +210,12 @@ class MuestraService:
         *,
         dni: str | None = None,
         estudio_id: int | None = None,
-        estado: EstadoEstudio | None = None,
     ) -> list[dict[str, Any]]:
-        """Lista los estudios elegibles para declarar remuestreo por calidad (Escenario 10)."""
+        """Lista los estudios en viaje a Corea elegibles para declarar remuestreo (Escenario 10)."""
         estudios = MuestraRepo.listar_estudios_remuestreables(
             estados_permitidos=ESTADOS_APTOS_REMUESTREO,
             dni=dni,
             estudio_id=estudio_id,
-            estado=estado,
         )
         return [cls._serializar_estudio_remuestreable(e) for e in estudios]
 

@@ -4,14 +4,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
-from src.core.models.enums import EstadoEstudio, MotivoDescarte
+from src.core.models.enums import MotivoDescarte
 from src.core.services.excepciones import ErrorDatosInvalidos
-
-ESTADOS_REMUESTREABLES: tuple[EstadoEstudio, ...] = (
-    EstadoEstudio.EN_VIAJE_COREA,
-    EstadoEstudio.EN_LAB_CENTRAL,
-    EstadoEstudio.EN_ESPERA_RETIRO,
-)
 
 
 def _parsear_entero_positivo(valor_raw: Any, nombre_campo: str) -> tuple[int | None, str | None]:
@@ -104,23 +98,9 @@ def validar_filtros_remuestreables(args: Any) -> dict[str, Any]:
     if error:
         raise ErrorDatosInvalidos(error)
 
-    estado_obj: EstadoEstudio | None = None
-    estado_raw = args.get("estado") if hasattr(args, "get") else None
-    if estado_raw is not None and str(estado_raw).strip():
-        estado_str = str(estado_raw).strip()
-        mapa_estados = {e.value: e for e in ESTADOS_REMUESTREABLES}
-        estado_obj = mapa_estados.get(estado_str)
-        if estado_obj is None:
-            valores = ", ".join(e.value for e in ESTADOS_REMUESTREABLES)
-            raise ErrorDatosInvalidos(
-                f"El parametro 'estado' debe ser uno de: {valores}.",
-                codigo="ESTADO_FILTRO_INVALIDO",
-            )
-
     return {
         "dni": dni,
         "estudio_id": estudio_id,
-        "estado": estado_obj,
     }
 
 

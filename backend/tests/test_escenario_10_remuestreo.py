@@ -268,7 +268,7 @@ def test_listar_remuestreables_y_tc01_rollback_desde_corea(app, client, session,
         f"/api/v1/estudios/{est_1.id}/remuestreo",
         headers=headers,
         json={
-            "motivo_descarte": "baja_calidad",
+            "motivo_descarte": "adn_insuficiente",
             "observaciones_calidad": "Muestra hemolizada al arribo en Corea segun reporte lote #7",
             "motivo": "Reporte de baja calidad recibido desde Corea; requiere nueva extraccion",
         },
@@ -281,7 +281,7 @@ def test_listar_remuestreables_y_tc01_rollback_desde_corea(app, client, session,
     assert data["estado_anterior"] == EstadoEstudio.EN_VIAJE_COREA.value
     assert data["estado_nuevo"] == EstadoEstudio.REMUESTREO_REQUERIDO.value
     assert data["muestra_descartada_id"] == muestra_1.id
-    assert data["motivo_descarte"] == MotivoDescarte.BAJA_CALIDAD.value
+    assert data["motivo_descarte"] == MotivoDescarte.ADN_INSUFICIENTE.value
     assert data["sample_set_id"] == sample_set.id
 
     session.refresh(muestra_1)
@@ -290,7 +290,7 @@ def test_listar_remuestreables_y_tc01_rollback_desde_corea(app, client, session,
     session.refresh(sample_set)
     session.refresh(pago)
 
-    assert muestra_1.motivo_descarte == MotivoDescarte.BAJA_CALIDAD
+    assert muestra_1.motivo_descarte == MotivoDescarte.ADN_INSUFICIENTE
     assert "hemolizada" in (muestra_1.observaciones_calidad or "")
     assert muestra_1.sample_set_id == sample_set.id
     assert sample_set.estado == EstadoSampleSet.EN_VIAJE_COREA
@@ -313,7 +313,7 @@ def test_listar_remuestreables_y_tc01_rollback_desde_corea(app, client, session,
     assert reg.usuario_id == datos_remuestreo["u_admin"].id
     assert reg.cambios["estado"]["anterior"] == EstadoEstudio.EN_VIAJE_COREA.value
     assert reg.cambios["estado"]["nuevo"] == EstadoEstudio.REMUESTREO_REQUERIDO.value
-    assert reg.cambios["motivo_descarte"]["nuevo"] == "baja_calidad"
+    assert reg.cambios["motivo_descarte"]["nuevo"] == "adn_insuficiente"
 
     # Avisos internos APP para Paciente y Medico + mails enviados
     aviso_pac = session.get(Aviso, data["aviso_paciente_id"])
@@ -325,21 +325,22 @@ def test_listar_remuestreables_y_tc01_rollback_desde_corea(app, client, session,
 
 
 def test_tc02_rechazo_motivo_invalido_volumen_insuficiente(app, client, session, datos_remuestreo):
-    """TC-02: Rechaza con 422 MOTIVO_DESCARTE_INVALIDO cualquier motivo no contemplado (ej. volumen_insuficiente)."""
+    """TC-02: Rechaza con 422 MOTIVO_DESCARTE_INVALIDO motivos distintos de adn_insuficiente/desnaturalizada."""
     headers = _auth_header_para(app, datos_remuestreo["u_admin"])
     est_1 = datos_remuestreo["est_1"]
     muestra_1 = datos_remuestreo["muestra_1"]
 
-    resp = client.post(
-        f"/api/v1/estudios/{est_1.id}/remuestreo",
-        headers=headers,
-        json={
-            "motivo_descarte": "volumen_insuficiente",
-            "motivo": "Intento obsoleto",
-        },
-    )
-    assert resp.status_code == 422
-    assert resp.get_json()["code"] == "MOTIVO_DESCARTE_INVALIDO"
+    for motivo_bad in ("volumen_insuficiente", "baja_calidad"):
+        resp = client.post(
+            f"/api/v1/estudios/{est_1.id}/remuestreo",
+            headers=headers,
+            json={
+                "motivo_descarte": motivo_bad,
+                "motivo": "Intento no contemplado",
+            },
+        )
+        assert resp.status_code == 422
+        assert resp.get_json()["code"] == "MOTIVO_DESCARTE_INVALIDO"
 
     session.refresh(est_1)
     session.refresh(muestra_1)
@@ -398,7 +399,7 @@ def test_tc04_y_tc05_permisos_y_estados_invalidos(app, client, session, datos_re
     est_1 = datos_remuestreo["est_1"]
     est_bio = datos_remuestreo["est_bio"]
     headers_admin = _auth_header_para(app, datos_remuestreo["u_admin"])
-    payload = {"motivo_descarte": "baja_calidad", "motivo": "Reporte Corea"}
+    payload = {"motivo_descarte": "adn_insuficiente", "motivo": "Reporte Corea"}
 
     # Sin sesion -> 401
     assert client.post(f"/api/v1/estudios/{est_1.id}/remuestreo", json=payload).status_code == 401
@@ -419,21 +420,38 @@ def test_tc04_y_tc05_permisos_y_estados_invalidos(app, client, session, datos_re
         == 404
     )
 
-    # TC-05: Estudio en bioinformatica -> 409 ESTADO_ESTUDIO_INVALIDO_PARA_REMUESTREO
-    resp_bio = client.post(
-        f"/api/v1/estudios/{est_bio.id}/remuestreo",
-        headers=headers_admin,
-        json=payload,
-    )
-    assert resp_bio.status_code == 409
-    assert resp_bio.get_json()["code"] == "ESTADO_ESTUDIO_INVALIDO_PARA_REMUESTREO"
+    # TC-05: Estudio en bioinformatica o en lab central -> 409 ESTADO_ESTUDIO_INVALIDO_PARA_REMUESTREO
+    for estado_no_apto in (est_bio,):
+        resp_bio = client.post(
+            f"/api/v1/estudios/{estado_no_apto.id}/remuestreo",
+            headers=headers_admin,
+            json=payload,
+        )
+        assert resp_bio.status_code == 409
+        assert resp_bio.get_json()["code"] == "ESTADO_ESTUDIO_INVALIDO_PARA_REMUESTREO"
 
-    # Estudio en EN_LAB_CENTRAL sin muestra vigente -> 409 SIN_MUESTRA_VIGENTE
-    est_sin_muestra = Estudio(
+    est_lab = Estudio(
         paciente_id=datos_remuestreo["est_2"].paciente_id,
         medico_id=est_1.medico_id,
         patologia_sospechada_id=est_1.patologia_sospechada_id,
         estado=EstadoEstudio.EN_LAB_CENTRAL,
+    )
+    session.add(est_lab)
+    session.commit()
+    resp_lab = client.post(
+        f"/api/v1/estudios/{est_lab.id}/remuestreo",
+        headers=headers_admin,
+        json=payload,
+    )
+    assert resp_lab.status_code == 409
+    assert resp_lab.get_json()["code"] == "ESTADO_ESTUDIO_INVALIDO_PARA_REMUESTREO"
+
+    # Estudio en EN_VIAJE_COREA sin muestra vigente -> 409 SIN_MUESTRA_VIGENTE
+    est_sin_muestra = Estudio(
+        paciente_id=datos_remuestreo["est_2"].paciente_id,
+        medico_id=est_1.medico_id,
+        patologia_sospechada_id=est_1.patologia_sospechada_id,
+        estado=EstadoEstudio.EN_VIAJE_COREA,
     )
     session.add(est_sin_muestra)
     session.commit()
@@ -460,7 +478,7 @@ def test_rollback_si_falla_envio_email(app, client, session, datos_remuestreo):
     resp = client.post(
         f"/api/v1/estudios/{est_1.id}/remuestreo",
         headers=headers_admin,
-        json={"motivo_descarte": "baja_calidad", "motivo": "Muestra no apta"},
+        json={"motivo_descarte": "desnaturalizada", "motivo": "Muestra no apta"},
     )
     assert resp.status_code == 502
     assert resp.get_json()["retryable"] is True
