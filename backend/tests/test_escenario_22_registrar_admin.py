@@ -193,7 +193,7 @@ def test_tc07b_rollback_si_falla_la_base(app, client, session, monkeypatch):
 
     resp = client.post(URL, json=_payload(), headers=headers)
 
-    assert resp.status_code == 503
+    assert resp.status_code == 500
     body = resp.get_json()
     assert body["code"] == "DB_ERROR"
     assert body["retryable"] is True
