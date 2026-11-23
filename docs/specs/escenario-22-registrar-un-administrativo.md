@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 22 – Registrar un administrativo
-**Versión**: 2.0
-**Fecha**: 2026-11-20
+**Versión**: 2.1
+**Fecha**: 2026-11-23
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-22`
@@ -65,7 +65,7 @@
 **Actor**: Router HTTP (`admin_usuarios.py`) -> Servicio de Usuarios (`usuario_service.py`)
 **Action**:
 1. Comprueba que el usuario autenticado posea `Rol.ADMIN_GENERAL`.
-2. Valida que `nombre`, `apellido`, `telefono`, `email` y `password` estén presentes y no vacíos; longitudes máximas conforme al modelo `Usuario` (`nombre <= 100`, `apellido <= 100`, `telefono <= 30`, `email <= 255`); formato válido de `email`; y política mínima de `password` (`validar_politica_password`, >= 8 caracteres).
+2. Valida que `nombre`, `apellido`, `telefono`, `email` y `password` estén presentes y no vacíos; longitudes máximas conforme al modelo `Usuario` (`nombre <= 100`, `apellido <= 100`, `telefono <= 30`, `email <= 255`); formato válido de `email`; formato válido de `telefono` (expresión `^\+?[\d\s\-()]{7,20}$`, la misma `_REGEX_TELEFONO` de `usuario_service.py` usada en el Escenario 31); y política mínima de `password` (`validar_politica_password`, >= 8 caracteres).
 **Timeout**: `1s`
 **Input**:
 ```json
@@ -83,7 +83,7 @@
 **Output on FAILURE**:
   - `FAILURE(unauthorized)`: Sin sesión activa -> retornar `401 Unauthorized`.
   - `FAILURE(forbidden)`: El usuario autenticado no tiene `Rol.ADMIN_GENERAL` (por ejemplo, es `Rol.ADMINISTRATIVO`, `Rol.GERENTE_MEDICO`, `Rol.MEDICO` o `Rol.PACIENTE`) -> retornar `403 Forbidden` (`SOLO_ADMIN_GENERAL`), sin efectos secundarios.
-  - `FAILURE(validation_error)`: Campos obligatorios faltantes o vacíos, `email` inválido, longitudes excedidas o `password` que no cumple la política -> retornar `422 Unprocessable Entity` (`DATOS_ENTRADA_INVALIDOS`).
+  - `FAILURE(validation_error)`: Campos obligatorios faltantes o vacíos, `email` o `telefono` con formato inválido, longitudes excedidas o `password` que no cumple la política -> retornar `422 Unprocessable Entity` (`DATOS_ENTRADA_INVALIDOS`).
 
 **Observable states during this step**:
   - Customer/Actor (**Admin general**) sees: Indicador de envío en el formulario de alta.
@@ -122,7 +122,7 @@
 **Output on SUCCESS**: `{ usuario: Usuario }` -> Retornar `201 Created` al **admin general** (FIN DEL WORKFLOW).
 **Output on FAILURE**:
   - `FAILURE(conflict)`: Condición de carrera donde otra petición concurrente insertó el mismo `email` entre `STEP 2` y `STEP 3` (`IntegrityError` sobre `usuarios.email`) -> `ABORT_CLEANUP` -> retornar `409 Conflict` (`EMAIL_YA_REGISTRADO`).
-  - `FAILURE(database_error / timeout)`: Fallo en PostgreSQL -> `ABORT_CLEANUP` -> retornar `503 Service Unavailable` (`DB_ERROR`, `retryable=True`).
+  - `FAILURE(database_error / timeout)`: Fallo en PostgreSQL (`SQLAlchemyError`) -> `ABORT_CLEANUP` -> retornar `500 Internal Server Error` (`DB_ERROR`, `retryable=True`), mediante `ErrorBaseDatos` (`app/src/core/services/excepciones.py`).
 
 **Observable states during this step**:
   - Customer/Actor (**Admin general**) sees: Notificación "Administrativo registrado exitosamente" y detalle del usuario creado.
@@ -138,7 +138,7 @@
 **Actions** (in order):
   1. Ejecutar `db.session.rollback()`.
   2. Registrar el error en los logs de aplicación con el detalle de la restricción violada.
-**What customer/actor (**Admin general**) sees**: Mensaje de error específico (`409` si el correo ya existe, `503` si hubo un fallo temporal de base de datos).
+**What customer/actor (**Admin general**) sees**: Mensaje de error específico (`409` si el correo ya existe, `500` con `retryable=true` si hubo un fallo temporal de base de datos).
 **What operator sees**: Log `WARN`/`ERROR` indicando rollback limpio, sin registros incompletos en `usuarios`.
 
 ---
@@ -191,7 +191,7 @@ Estudio (EstadoEstudio):
   }
 }
 ```
-**Failure response** (`401` / `403` / `409` / `422` / `503`):
+**Failure response** (`401` / `403` / `409` / `422` / `500`):
 ```json
 {
   "ok": false,
@@ -201,7 +201,7 @@ Estudio (EstadoEstudio):
 }
 ```
 **Timeout**: `5s`
-**ON FAILURE**: Mantener los datos en el formulario del **admin general** resaltando el campo en conflicto (`email`) o con error de validación; en caso de `503`, permitir reintentar.
+**ON FAILURE**: Mantener los datos en el formulario del **admin general** resaltando el campo en conflicto (`email`) o con error de validación; en caso de `500` con `retryable=true`, permitir reintentar.
 
 ---
 
@@ -221,6 +221,8 @@ Estudio (EstadoEstudio):
 | RC-2 | En `.ai/2-Glosario_LEL.md` (`Sujeto: Administrativo`): *"El administrativo no puede darse de baja ni borrar su información"*. | Low | State Transitions / Test Cases | No se expone endpoint `DELETE`; se incluye `TC-08`. |
 | RC-3 | El alta de **gerente médico** (Escenario 31) ya está implementada en `app/src/web/api/admin_usuarios.py` (blueprint `/api/v1/admin`), `app/src/web/validators/admin_usuarios_validator.py` y `usuario_service.registrar_gerente_medico`, con los códigos `SOLO_ADMIN_GENERAL`, `DATOS_ENTRADA_INVALIDOS` y `EMAIL_YA_REGISTRADO`. | Medium | Actors / STEP 1 | Se reutiliza el mismo blueprint, decorador, helpers (`hashear_password`, `validar_politica_password`, `usuario_repo.buscar_por_email`) y códigos de error. Se agregan `RegistroAdministrativoSchema`, `registrar_administrativo` y `usuario_repo.crear_administrativo`. |
 | RC-4 | La versión 1.0 recibía `dispositivo_identificador` para registrar el dispositivo en `dispositivos_conocidos`. | Low | STEP 3 / Handoff | Se elimina: el dispositivo de la petición es el del **admin general**. El **administrativo** registra su dispositivo en su primer ingreso (Escenarios 26/27). |
+| RC-5 | `ErrorBaseDatos` (`app/src/core/services/excepciones.py`) responde `500` con `reintentable=True` en todo el proyecto (el Escenario 31 lo usa así); la v2.0 de esta spec pedía `503`. | Medium | STEP 3 / ABORT_CLEANUP / Handoff | Se adopta `500 DB_ERROR retryable=true` para no introducir un status distinto solo para este escenario. |
+| RC-6 | `usuario_service.registrar_gerente_medico` valida el formato de `telefono` con `_REGEX_TELEFONO`; la v2.0 de esta spec solo validaba la longitud. | Low | STEP 1 / TC-05 | Se reutiliza la misma validación en un helper común de alta por **admin general**. |
 
 ---
 
@@ -232,10 +234,11 @@ Estudio (EstadoEstudio):
 | `TC-02`: Rechazo por usuario sin rol `ADMIN_GENERAL` | `POST /api/v1/admin/administrativos` enviado por `Rol.ADMINISTRATIVO`, `Rol.GERENTE_MEDICO`, `Rol.MEDICO` o `Rol.PACIENTE` | Retorna `403 Forbidden` (`SOLO_ADMIN_GENERAL`); 0 filas insertadas en `usuarios`. |
 | `TC-03`: Rechazo sin sesión | `POST /api/v1/admin/administrativos` sin token | Retorna `401 Unauthorized`. |
 | `TC-04`: Campos obligatorios faltantes o vacíos | Payload sin `telefono` o con `nombre: ""` | Retorna `422 Unprocessable Entity` (`DATOS_ENTRADA_INVALIDOS`); 0 filas insertadas. |
-| `TC-05`: Email inválido o contraseña que no cumple la política | `email: "correo-invalido"` o `password: "123"` | Retorna `422 Unprocessable Entity` (`DATOS_ENTRADA_INVALIDOS`). |
+| `TC-05`: Email o teléfono con formato inválido, o contraseña que no cumple la política | `email: "correo-invalido"`, `telefono: "hola"` o `password: "123"` | Retorna `422 Unprocessable Entity` (`DATOS_ENTRADA_INVALIDOS`); 0 filas insertadas. |
 | `TC-06`: Correo electrónico duplicado | `email` ya registrado en `usuarios` (de cualquier rol) | Retorna `409 Conflict` (`EMAIL_YA_REGISTRADO`). |
 | `TC-07`: Colisión concurrente con el mismo email | Dos `POST /api/v1/admin/administrativos` simultáneos con igual `email` | Una retorna `201 Created` y la otra `409 Conflict` tras `ABORT_CLEANUP`. |
 | `TC-08`: Prohibición de baja o borrado del administrativo | `DELETE /api/v1/admin/administrativos/:id` o `DELETE /api/v1/usuarios/me` | Retorna `403 Forbidden` o `405 Method Not Allowed`, cumpliendo la regla del LEL. |
+| `TC-09`: Fallo de base de datos en la persistencia | `POST /api/v1/admin/administrativos` válido con `COMMIT` que lanza `SQLAlchemyError` | Retorna `500 Internal Server Error` (`DB_ERROR`, `retryable=true`); `ABORT_CLEANUP` deja 0 filas nuevas en `usuarios`. |
 
 ---
 
@@ -256,3 +259,4 @@ Estudio (EstadoEstudio):
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/usuarios.py` (`Usuario`) y `enums.py` (`Rol.ADMINISTRATIVO`). | Aprobada para implementación. |
 | 2026-11-20 | Cambio de requerimiento: el **administrativo** ya no se autorregistra; lo da de alta el **admin general** (como en el Escenario 31). Se actualizan `.ai/2-Glosario_LEL.md` y `.ai/3-Escenarios.md`. El endpoint pasa de `POST /api/v1/administrativos/registro` a `POST /api/v1/admin/administrativos`; los códigos de error se alinean con el Escenario 31 (`SOLO_ADMIN_GENERAL`, `DATOS_ENTRADA_INVALIDOS` 422, `EMAIL_YA_REGISTRADO`); se elimina `dispositivo_identificador`. E22 aún no estaba implementado, por lo que no hay código a migrar. | Spec v2.0 aprobada. |
+| 2026-11-23 | Al reutilizar la implementación del Escenario 31 se detectaron dos diferencias: (1) el fallo de base de datos se modela con `ErrorBaseDatos`, que responde `500` y no `503`; (2) el Escenario 31 valida el formato de `telefono` y esta spec no lo hacía. | Spec v2.1: `503` → `500 DB_ERROR retryable=true` (STEP 3, ABORT_CLEANUP, Handoff); se agrega la validación de formato de `telefono` (STEP 1, TC-05); se agrega TC-09 (fallo de BD); RC-5 y RC-6. |
