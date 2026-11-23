@@ -21,6 +21,7 @@ import RemuestreoAdminPage from "./pages/RemuestreoAdminPage";
 import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 import AltaGerenteMedicoPage from "./pages/AltaGerenteMedicoPage";
+import AltaAdministrativoPage from "./pages/AltaAdministrativoPage";
 
 const RUTAS_INICIO = [
   { path: "/admin/dashboard", titulo: "Administración general" },
@@ -124,6 +125,10 @@ export default function App() {
           <Route
             path="/admin/gerentes-medicos/nuevo"
             element={<AltaGerenteMedicoPage sesion={sesion} />}
+          />
+          <Route
+            path="/admin/administrativos/nuevo"
+            element={<AltaAdministrativoPage sesion={sesion} />}
           />
         </Route>
 

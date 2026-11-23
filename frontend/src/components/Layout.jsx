@@ -28,6 +28,7 @@ const MENU_POR_ROL = {
     admin_general: [
         { to: "/admin/dashboard", label: "Panel general" },
         { to: "/admin/gerentes-medicos/nuevo", label: "Alta gerente médico" },
+        { to: "/admin/administrativos/nuevo", label: "Alta administrativo" }
     ],
 };
 

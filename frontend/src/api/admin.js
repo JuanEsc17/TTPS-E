@@ -33,3 +33,12 @@ export function registrarGerenteMedicoRequest({
         },
     });
 }
+export function registrarAdministrativoRequest({ token, nombre, apellido, telefono, email, password }){
+    return requestJson("/api/v1/admin/administrativos", {
+        token,
+        method: "POST",
+        body: {
+            nombre, apellido, telefono, email, password,
+        },
+    });
+}
