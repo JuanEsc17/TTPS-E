@@ -2,7 +2,7 @@
 from marshmallow import EXCLUDE, Schema, fields, pre_load
 
 
-class RegistroGerenteMedicoSchema(Schema):
+class RegistroUsuarioPorAdminSchema(Schema):
     class Meta:
         unknown = EXCLUDE  # si mandan en el json rol: admin general, lo ignora y no da error de validacion
     nombre = fields.Str(required=True)
@@ -10,8 +10,7 @@ class RegistroGerenteMedicoSchema(Schema):
     telefono = fields.Str(required=True)
     email = fields.Str(required=True)
     password = fields.Str(required=True)
-    matricula = fields.Str(required=True)
-    especialidades_ids = fields.List(fields.Int(strict=True), required=True)
+
     @pre_load
     def normalizar_datos(self, data, **kwargs):
         """ Normaliza los datos de entrada: quita espacios al inicio y final de los strings."""
@@ -23,3 +22,16 @@ class RegistroGerenteMedicoSchema(Schema):
                 limpio[campo] = limpio[campo].strip()
         return limpio
 
+class RegistroGerenteMedicoSchema(RegistroUsuarioPorAdminSchema):
+    class Meta:
+        unknown = EXCLUDE  # si mandan en el json rol: admin general, lo ignora y no da error de validacion
+    nombre = fields.Str(required=True)
+    apellido = fields.Str(required=True)
+    telefono = fields.Str(required=True)
+    email = fields.Str(required=True)
+    password = fields.Str(required=True)
+    matricula = fields.Str(required=True)
+    especialidades_ids = fields.List(fields.Int(strict=True), required=True)
+
+class RegistroAdministrativoSchema(RegistroUsuarioPorAdminSchema):
+    pass
