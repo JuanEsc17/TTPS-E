@@ -24,6 +24,7 @@ from .web.api.salud import salud_bp
 from .web.api.snomed import snomed_bp
 from .web.handlers.errors import registrar_manejadores_errores
 from .web.api.admin_usuarios import admin_usuarios_bp  
+from .web.api.presupuestos import presupuestos_bp
 
 def _cargar_entorno(ruta_env: Path | None = None) -> None:
     """Carga variables desde `.env` sin sobrescribir las ya definidas en el entorno."""
@@ -91,6 +92,7 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(bioinformatica_bp)
     app.register_blueprint(resultados_bp)
     app.register_blueprint(salud_bp)
+    app.register_blueprint(presupuestos_bp)
 
     @app.cli.command("init-db")
     def init_db_cli() -> None:
