@@ -20,6 +20,7 @@ const MENU_POR_ROL = {
         { to: "/medico/estudios", label: "Estudios" },
     ],
     administrativo: [
+        { to: "/administracion/presupuestos", label: "Presupuestos" },
         { to: "/administracion/muestras", label: "Registro de muestras" },
         { to: "/administracion/remuestreos", label: "Remuestreos" },
         { to: "/administracion/estudios", label: "Carga de datos ACTG" }],

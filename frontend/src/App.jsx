@@ -18,6 +18,7 @@ import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
 import RegistroMuestraAdminPage from "./pages/RegistroMuestraAdminPage";
 import RemuestreoAdminPage from "./pages/RemuestreoAdminPage";
+import PresupuestosAdminPage from "./pages/PresupuestosAdminPage";
 import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 import AltaGerenteMedicoPage from "./pages/AltaGerenteMedicoPage";
@@ -129,6 +130,10 @@ export default function App() {
           <Route
             path="/admin/administrativos/nuevo"
             element={<AltaAdministrativoPage sesion={sesion} />}
+          />
+          <Route
+            path="/administracion/presupuestos"
+            element={<PresupuestosAdminPage sesion={sesion} />}
           />
         </Route>
 
