@@ -149,7 +149,7 @@ class EconomiaService:
             ) from exc
 
     # ------------------------------------------------------------------ caso de uso
-        @staticmethod
+    @staticmethod
     def listar_pendientes_presupuesto(*, dni: str | None = None) -> list[dict[str, Any]]:
         """STEP 0: bandeja de estudios en Creado sin presupuesto, con desglose estimado."""
         resultado: list[dict[str, Any]] = []
