@@ -25,11 +25,6 @@ class RegistroUsuarioPorAdminSchema(Schema):
 class RegistroGerenteMedicoSchema(RegistroUsuarioPorAdminSchema):
     class Meta:
         unknown = EXCLUDE  # si mandan en el json rol: admin general, lo ignora y no da error de validacion
-    nombre = fields.Str(required=True)
-    apellido = fields.Str(required=True)
-    telefono = fields.Str(required=True)
-    email = fields.Str(required=True)
-    password = fields.Str(required=True)
     matricula = fields.Str(required=True)
     especialidades_ids = fields.List(fields.Int(strict=True), required=True)
 

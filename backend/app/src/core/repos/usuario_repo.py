@@ -123,7 +123,7 @@ def crear_administrativo(
     telefono: str,
     email: str,
     password_hash: str,
-) -> tuple[Usuario]:
+) -> Usuario:
     """Crea Usuario (Rol.ADMINISTRATIVO)"""
     try:
         usuario = Usuario(
@@ -149,7 +149,7 @@ def crear_administrativo(
         db.session.rollback()
         logger.warning("abort_cleanup alta_administrativo conflicto: %s", exc)
         raise ErrorConflicto(
-            "Ese correo electrónico ya está en uso.",
+            "Ese correo electrónico ya se encuentra registrado.",
             codigo="EMAIL_YA_REGISTRADO",
         ) from exc
     except SQLAlchemyError as exc:

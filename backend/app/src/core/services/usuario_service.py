@@ -1,7 +1,7 @@
-"""Logica de negocio para el alta de usuarios por el admin general (Escenario 31)."""
+"""Logica de negocio para el alta de usuarios por el admin general (Escenario 22 y 31)."""
 import logging
 import re
-
+from typing import NoReturn
 from src.core.models import Rol, Usuario
 from src.core.repos import medico_repo, usuario_repo
 from src.core.services.excepciones import (
@@ -11,7 +11,6 @@ from src.core.services.excepciones import (
     ErrorSinPermiso,
 )
 from src.core.services.seguridad import hashear_password, validar_politica_password
-from typing import NoReturn
 
 
 logger = logging.getLogger(__name__)
@@ -110,11 +109,6 @@ def registrar_gerente_medico(
     if faltantes:
         raise ErrorDatosInvalidos(f"Especialidades inexistentes: {sorted(faltantes)}",
                                   codigo="ESPECIALIDAD_INEXISTENTE")
-        ids_unicos = list(dict.fromkeys(especialidades_ids))  # saca repetidos
-    if not ids_unicos:
-        raise ErrorDatosInvalidos("Debe seleccionar al menos una especialidad.")
-    logger.info("step=1_validacion_alta_gerente admin_id=%s email=%s matricula=%s",
-                admin.id, email, matricula)
     # STEP 3: hashear y guardar en una transaccion
     usuario, medico = medico_repo.crear_gerente_medico_completo(
         nombre=nombre,
@@ -183,9 +177,10 @@ def registrar_administrativo(
         "debe_cambiar_password": usuario.debe_cambiar_password,
         "created_at": usuario.created_at.isoformat() if usuario.created_at else None,
     }
+
 def rechazar_baja_administrativo(*, admin: Usuario, usuario_id: int) -> NoReturn:
     """Regla LEL: el administrativo no puede darse de baja ni borrar su informacion."""
-    logger.warning("intento_baja_administrativo admin_id=%s usuario_id=%s",
+    logger.warning("intento_baja_solicitante admin_id=%s usuario_id=%s",
                    admin.id, usuario_id)
     raise ErrorSinPermiso(
         "El administrativo no puede darse de baja ni borrar su información.",
