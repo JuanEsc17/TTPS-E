@@ -26,6 +26,8 @@ import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 import AltaGerenteMedicoPage from "./pages/AltaGerenteMedicoPage";
 import AltaAdministrativoPage from "./pages/AltaAdministrativoPage";
+import MedicosAutorizadosPacientePage from "./pages/MedicosAutorizadosPacientePage";
+import HistoriaClinicaPacientePage from "./pages/HistoriaClinicaPacientePage";
 
 const RUTAS_INICIO = [
   { path: "/admin/dashboard", titulo: "Administración general" },
@@ -75,11 +77,13 @@ export default function App() {
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
           <Route path="/paciente/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
+          <Route path="/paciente/medicos-autorizados" element={<MedicosAutorizadosPacientePage sesion={sesion} />} />
           <Route path="/medico/estudios" element={<EstudiosMedicoPage sesion={sesion} />} />
           <Route path="/medico/estudios/nuevo" element={<AltaEstudioPage sesion={sesion} />} />
           <Route path="/estudios/:estudioId/resultado" element={<ResultadoEstudioPage sesion={sesion} />} />
           <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
           <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
+          <Route path="/medico/pacientes/:pacienteId/historia-clinica" element={<HistoriaClinicaPacientePage sesion={sesion} />} />
           <Route path="/medico/pacientes/:pacienteId/familiares" element={<FamiliaresPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />

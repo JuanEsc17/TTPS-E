@@ -61,3 +61,46 @@ class GestionarFamiliaresSchema(Schema):
         unknown = EXCLUDE
 
     familiares = fields.List(fields.Nested(FamiliarInputSchema), required=True)
+
+
+class AutorizarMedicosSchema(Schema):
+    class Meta:
+        unknown = EXCLUDE
+
+    medicos_ids = fields.List(fields.Int(strict=True), required=True)
+    motivo = fields.Str(
+        required=False,
+        allow_none=True,
+        load_default=None,
+        validate=validate.Length(max=500),
+    )
+
+    @pre_load
+    def normalizar(self, data: dict, **kwargs: object) -> dict:
+        if not isinstance(data, dict):
+            return data
+        limpio = dict(data)
+        if isinstance(limpio.get("motivo"), str):
+            limpio["motivo"] = limpio["motivo"].strip() or None
+        return limpio
+
+
+class RevocarAutorizacionSchema(Schema):
+    class Meta:
+        unknown = EXCLUDE
+
+    motivo = fields.Str(
+        required=False,
+        allow_none=True,
+        load_default=None,
+        validate=validate.Length(max=500),
+    )
+
+    @pre_load
+    def normalizar(self, data: dict, **kwargs: object) -> dict:
+        if not isinstance(data, dict):
+            return data
+        limpio = dict(data)
+        if isinstance(limpio.get("motivo"), str):
+            limpio["motivo"] = limpio["motivo"].strip() or None
+        return limpio

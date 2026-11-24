@@ -209,6 +209,10 @@ export default function CampanaAvisos({ sesion }) {
                                         rol === "paciente" &&
                                         !esResultado &&
                                         /remuestreo/i.test(aviso.mensaje || "");
+                                    const esAutorizacionHistoria =
+                                        (rol === "medico" || rol === "gerente_medico") &&
+                                        !esResultado &&
+                                        /historia clinica/i.test(aviso.mensaje || "");
                                     const fecha = formatearFechaAviso(
                                         aviso.enviado_en || aviso.created_at
                                     );
@@ -256,6 +260,14 @@ export default function CampanaAvisos({ sesion }) {
                                                         className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
                                                     >
                                                         Sacar nuevo turno →
+                                                    </Link>
+                                                ) : esAutorizacionHistoria ? (
+                                                    <Link
+                                                        to="/medico/pacientes"
+                                                        onClick={() => setAbierto(false)}
+                                                        className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
+                                                    >
+                                                        Ver pacientes →
                                                     </Link>
                                                 ) : null}
                                             </div>

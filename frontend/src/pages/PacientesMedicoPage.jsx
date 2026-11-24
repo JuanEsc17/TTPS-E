@@ -3,38 +3,45 @@ import { Link } from "react-router-dom";
 import { listarPacientesRequest } from "../api/pacientes";
 
 export default function PacientesMedicoPage({ sesion }) {
-    const [pacientes, setPacientes] = useState([]);
-    const [cargando, setCargando] = useState(true);
-    const [error, setError] = useState("");
-
-    async function cargar() {
-        setCargando(true);
-        setError("");
-        try {
-            const lista = await listarPacientesRequest(sesion?.access_token);
-            setPacientes(lista || []);
-        } catch (err) {
-            setError(err.message);
-        } finally {
-            setCargando(false);
-        }
-    }
+    const token = sesion?.access_token;
+    const [recargaId, setRecargaId] = useState(0);
+    const [estado, setEstado] = useState({ recargaId: -1, pacientes: [], error: "" });
 
     useEffect(() => {
-        if (sesion?.access_token) {
-            cargar();
-        }
-    }, [sesion?.access_token]);
+        if (!token) return;
+        let cancelado = false;
+        listarPacientesRequest(token)
+            .then((lista) => {
+                if (!cancelado) setEstado({ recargaId, pacientes: lista || [], error: "" });
+            })
+            .catch((err) => {
+                if (!cancelado) {
+                    setEstado({
+                        recargaId,
+                        pacientes: [],
+                        error: err.message || "No se pudieron cargar los pacientes.",
+                    });
+                }
+            });
+        return () => {
+            cancelado = true;
+        };
+    }, [token, recargaId]);
+
+    const cargando = Boolean(token) && estado.recargaId !== recargaId;
+    const pacientes = estado.pacientes;
+    const error = estado.recargaId === recargaId ? estado.error : "";
+    const cargar = () => setRecargaId((n) => n + 1);
 
     return (
         <div className="space-y-6">
             <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-[#0B4F8A]">
-                        Gestión clínica · Médico tratante
+                        Gestión clínica · Médicos y consultas autorizadas
                     </p>
                     <h1 className="font-titulo mt-1 text-2xl font-semibold text-slate-900">
-                        Pacientes registrados
+                        Pacientes autorizados
                     </h1>
                 </div>
                 <Link
@@ -80,7 +87,7 @@ export default function PacientesMedicoPage({ sesion }) {
                                         <th className="pb-3 pr-4">Paciente</th>
                                         <th className="pb-3 pr-4">DNI</th>
                                         <th className="pb-3 pr-4">Diagnóstico presuntivo</th>
-                                        <th className="pb-3 pr-4">Sospecha</th>
+                                        <th className="pb-3 pr-4">Acceso</th>
                                         <th className="pb-3 pr-4">Familiograma</th>
                                         <th className="pb-3">Acciones</th>
                                     </tr>
@@ -95,10 +102,23 @@ export default function PacientesMedicoPage({ sesion }) {
                                                 <p className="text-[11px] text-slate-500">{p.email}</p>
                                             </td>
                                             <td className="py-3 pr-4 font-mono">{p.dni}</td>
-                                            <td className="py-3 pr-4 font-medium text-[#0B4F8A]">
-                                                {p.patologia_nombre}
+                                            <td className="py-3 pr-4">
+                                                <p className="font-medium text-[#0B4F8A]">{p.patologia_nombre}</p>
+                                                <p className="text-[11px] capitalize text-slate-500">
+                                                    Sospecha {p.tipo_sospecha}
+                                                </p>
                                             </td>
-                                            <td className="py-3 pr-4 capitalize">{p.tipo_sospecha}</td>
+                                            <td className="py-3 pr-4">
+                                                {p.es_medico_alta === false ? (
+                                                    <span className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-0.5 text-[11px] font-medium text-[#0B4F8A]">
+                                                        Autorizado por paciente
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-700">
+                                                        Médico de alta
+                                                    </span>
+                                                )}
+                                            </td>
                                             <td className="py-3 pr-4">
                                                 {p.familiograma_pdf_path ? (
                                                     <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
@@ -111,12 +131,20 @@ export default function PacientesMedicoPage({ sesion }) {
                                                 )}
                                             </td>
                                             <td className="py-3">
-                                                <Link
-                                                    to={`/medico/pacientes/${p.paciente_id}/familiares`}
-                                                    className="font-semibold text-[#0B4F8A] hover:underline"
-                                                >
-                                                    Familiares / Familiograma
-                                                </Link>
+                                                <div className="flex flex-wrap items-center gap-3">
+                                                    <Link
+                                                        to={`/medico/pacientes/${p.paciente_id}/historia-clinica`}
+                                                        className="rounded-lg border border-[#0B4F8A]/30 bg-[#EAF2FA] px-2.5 py-1 text-[11px] font-semibold text-[#0B4F8A] transition hover:bg-[#DCEAF7]"
+                                                    >
+                                                        Ver historia clínica
+                                                    </Link>
+                                                    <Link
+                                                        to={`/medico/pacientes/${p.paciente_id}/familiares`}
+                                                        className="font-semibold text-slate-600 hover:text-[#0B4F8A] hover:underline"
+                                                    >
+                                                        Familiares
+                                                    </Link>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
