@@ -15,11 +15,11 @@ body:
       description: Seleccioná qué parte del sistema abarca principalmente esta solicitud.
       options:
         - Fullstack (Backend + Frontend)
-        - Backend (app/)
+        - Backend (backend/app/)
         - Frontend (frontend/)
         - Especificaciones SDD / Documentación (docs/specs/)
         - Base de datos / Migraciones
-        - Integraciones externas (clients/)
+        - Integraciones externas (backend/app/src/clients/)
         - Testing / Calidad / CI
     validations:
       required: true
@@ -48,7 +48,7 @@ body:
       label: Solución propuesta
       description: Detallá el comportamiento esperado, endpoints o componentes a crear y cambios técnicos sugeridos.
     validations:
-      required: true
+      required: false
 
   - type: textarea
     id: criterios
@@ -58,7 +58,7 @@ body:
       value: |
         - [ ] Spec definida o actualizada en `docs/specs/`
         - [ ] Implementación respetando capas (`router` -> `service` -> `repo` + `clients`) y dominio en español
-        - [ ] Tests unitarios/integración en `tests/` cubriendo los criterios de aceptación
+        - [ ] Tests unitarios/integración en `backend/tests/` cubriendo los criterios de aceptación
     validations:
       required: true
 
@@ -66,7 +66,7 @@ body:
     id: alternativas
     attributes:
       label: Alternativas consideradas o notas adicionales
-      description: Opcional. Comentá otras opciones evaluadas o dependencias requeridas (no agregar dependencias en `pyproject.toml` sin consenso).
+      description: Opcional. Comentá otras opciones evaluadas o dependencias requeridas (no agregar dependencias en `backend/pyproject.toml` sin consenso).
     validations:
       required: false
 

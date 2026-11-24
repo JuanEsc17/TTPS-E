@@ -1,4 +1,4 @@
-async function requestBio(url, { token, method = "GET", body } = {}) {
+async function requestBio(url, { token, method = "GET", body, signal, timeoutMs } = {}) {
     const headers = { Authorization: `Bearer ${token}` };
     let payload = body;
 
@@ -7,11 +7,49 @@ async function requestBio(url, { token, method = "GET", body } = {}) {
         payload = JSON.stringify(body);
     }
 
-    const resp = await fetch(url, {
-        method,
-        headers,
-        body: payload,
-    });
+    const controller = new AbortController();
+    let porTimeout = false;
+    const onExternalAbort = () => controller.abort();
+    if (signal) {
+        if (signal.aborted) {
+            controller.abort();
+        } else {
+            signal.addEventListener("abort", onExternalAbort, { once: true });
+        }
+    }
+    const timer = timeoutMs
+        ? setTimeout(() => {
+              porTimeout = true;
+              controller.abort();
+          }, timeoutMs)
+        : null;
+
+    let resp;
+    try {
+        resp = await fetch(url, {
+            method,
+            headers,
+            body: payload,
+            signal: controller.signal,
+        });
+    } catch (err) {
+        if (porTimeout) {
+            const timeoutErr = new Error(
+                "La consulta de variantes demoró demasiado. Podés reintentar sin perder tu análisis."
+            );
+            timeoutErr.code = "TIMEOUT";
+            timeoutErr.retryable = true;
+            throw timeoutErr;
+        }
+        if (err?.name === "AbortError") throw err;
+        const netErr = new Error("No se pudo conectar con el servidor. Verificá tu conexión e intentá nuevamente.");
+        netErr.code = "NETWORK_ERROR";
+        netErr.retryable = true;
+        throw netErr;
+    } finally {
+        if (timer) clearTimeout(timer);
+        if (signal) signal.removeEventListener("abort", onExternalAbort);
+    }
 
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.ok) {
@@ -71,21 +109,25 @@ export function tomarEstudioBioinformaticaRequest({ token, estudioId }) {
     });
 }
 
-export function consultarVariantesGenRequest({
+export async function consultarVariantesEstudioRequest({
     token,
+    estudioId,
     genId,
     q,
     clasificacion,
     limite = 50,
+    signal,
 }) {
     const params = new URLSearchParams();
     if (q && q.trim()) params.set("q", q.trim());
     if (clasificacion) params.set("clasificacion", clasificacion);
     if (limite) params.set("limite", String(limite));
     const qs = params.toString();
-    return requestBio(`/api/bioinformatica/genes/${genId}/variantes${qs ? `?${qs}` : ""}`, {
-        token,
-    });
+    const resp = await requestBio(
+        `/api/v1/estudios/${estudioId}/genes/${genId}/variantes${qs ? `?${qs}` : ""}`,
+        { token, signal, timeoutMs: 12000 }
+    );
+    return resp.data;
 }
 
 export function registrarVariantesAnalisisRequest({ token, estudioId, variantesIds }) {

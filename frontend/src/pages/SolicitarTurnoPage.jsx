@@ -474,7 +474,9 @@ export default function SolicitarTurnoPage({ sesion }) {
                                     : turnoActivo
                                         ? "Recordá presentarte con tu documento, orden de extracción y consentimiento informado."
                                         : estudioActual.habilitado_para_turno
-                                            ? "El pago o la autorización de obra social habilitan la reserva en cualquiera de nuestras sedes."
+                                            ? estudioActual.estado === "Remuestreo requerido"
+                                                ? "Tu muestra requiere una nueva extracción sin costo adicional. Elegí sede y horario."
+                                                : "El pago o la autorización de obra social habilitan la reserva en cualquiera de nuestras sedes."
                                             : "Para reservar un turno el estudio debe estar autorizado por obra social o abonado."}
                             </p>
                         </div>
