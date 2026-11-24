@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 30 – Asignar y aplicar un cupón
-**Versión**: 1.1
-**Fecha**: 2026-11-17
+**Versión**: 1.2
+**Fecha**: 2026-11-24
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-30`
@@ -16,7 +16,7 @@
 | **Objetos** | **Presupuesto** | Modelo `Presupuesto` (tabla `presupuestos`), `Pago` (`pagos`) y `Cuota` (`cuotas`) |
 | **Objetos** | **Estudio** | Modelo `Estudio` (tabla `estudios`) |
 | **Objetos** | **Obra social** | Modelo `ObraSocial` (tabla `obras_sociales`: `porcentaje_cobertura`) |
-| **Objetos** | **API de cupones** | Cliente HTTP externo (`app/src/clients/cupones_client.py`) para validar vigencia y consumir/vencer el cupón |
+| **Objetos** | **API de cupones** | Cliente HTTP externo (`app/src/clients/cupones_client.py`): `asignar_cupon_a_medico`, `asignar_cupon_a_paciente` y `canjear_cupon` (este último valida vigencia y uso, y vence el cupón) |
 | **Objetos** | **API de MercadoPago** | Pasarela externa (`mercadopago_client.py`) cuando el pago particular se abona en un pago o en cuotas |
 | **Verbos** | **Pagar presupuesto** | Acción del **paciente** que abona el **presupuesto** aplicando el **cupón** y habilita **sacar turno** |
 | **Estados** | **Creado**, **Autorizado** | `EstadoEstudio.CREADO` (pago particular) o `EstadoEstudio.AUTORIZADO` (copago remanente con **obra social**) |
@@ -31,14 +31,13 @@
 - **Episodios:**
   1. El **médico** asigna el **cupón** al **paciente** (habiendo sido previamente asignado el cupón al **médico** por el **gerente médico**).
   2. El **paciente** aplica el **cupón** (mediante código numérico o archivo PDF/QR) al pagar el **presupuesto**.
-  3. El sistema consulta a la **API de cupones** si el **cupón** está vigente.
+  3. El sistema verifica que el **cupón** pertenezca al **paciente**, no esté usado y no haya vencido (`vigente_hasta`).
   4. El sistema aplica el descuento, que se acumula con la cobertura de la **obra social**, y registra financieramente el pago en la tabla `pagos`.
-  5. El sistema avisa a la **API de cupones** que el **cupón** fue usado, para que venza, y marca `cupones.usado = True`.
+  5. Cuando **MercadoPago** confirma el pago (`approved`), el sistema canjea el **cupón** en la **API de cupones** para que venza y marca `cupones.usado = True`.
 
-**Resumen del flujo:** El escenario se compone de dos etapas encadenadas sobre la entidad `Cupon`:
-1. **Asignación (`STEP 1` y `STEP 2`):** El **gerente médico** asigna un **cupón** disponible a un **médico** (`PATCH /api/cupones/{cupon_id}/asignar-medico`, si no lo asignó al crearlo), y el **médico** tratante asigna uno de sus **cupones** disponibles a su **paciente** (`PATCH /api/cupones/{cupon_id}/asignar-paciente`).
-2. **Aplicación en el pago con MercadoPago o copago (`STEP 3` a `STEP 5`):** Cuando el **paciente** inicia el pago del **presupuesto** (`POST /api/v1/estudios/{estudio_id}/pagos` con `codigo_cupon` y `cantidad_cuotas >= 1`), el servicio bloquea la fila del **cupón** (`SELECT ... FOR UPDATE`), verifica que pertenezca al **paciente** y no esté usado, consulta su vigencia en la **API de cupones**, calcula el monto neto acumulando `ObraSocial.porcentaje_cobertura` + `Cupon.descuento_porcentaje` (truncado al 100% del `Presupuesto.monto_total_usd`) **antes de dividir en `Cuotas`**, crea el `Pago` y su preferencia en **MercadoPago**, y **solo cuando el webhook de MercadoPago confirma el pago (`approved`)** notifica el consumo a la **API de cupones** (`POST /canjear_cupon`) y marca `cupones.usado = True` y `cupones.usado_en = now()` (evitando quemar cupones en checkouts abandonados).
-
+**Resumen del flujo:** El escenario tiene dos etapas sobre `Cupon`:
+1. **Asignación (`STEP 1`):** El **gerente médico** asigna un **cupón** disponible a un **médico** (`PATCH /api/v1/cupones/{cupon_id}/asignar-medico`). Después, el **médico** lo asigna a su **paciente** (`PATCH /api/v1/cupones/{cupon_id}/asignar-paciente`). En los dos casos primero se llama a la **API de cupones** y después se actualiza la base local.
+2. **Aplicación en el pago (`STEP 2` a `STEP 5`, integrado con Escenario 06):** El **paciente** inicia el pago (`POST /api/v1/estudios/{estudio_id}/pagos` con `codigo_cupon` y `cantidad_cuotas >= 1`). El servicio bloquea el **cupón** (`FOR UPDATE`) y verifica que sea del **paciente**, que no esté usado y que no haya vencido. Calcula el monto neto acumulando la cobertura de la **obra social** y el descuento del **cupón** (con tope en el 100% del presupuesto) **antes de dividir en cuotas**, y crea el `Pago` (`PENDIENTE`) con su preferencia de **MercadoPago**. **El cupón no se consume todavía.** Recién cuando llega el webhook `approved` se invoca `POST /canjear_cupon` y se marca `usado = True`, `usado_en = now()`. Así un checkout abandonado no quema el cupón (ADR-001).
 ---
 
 ## Actors
@@ -48,10 +47,10 @@
 | **Gerente médico** (Sujeto LEL) | Asigna un **cupón** creado a un **médico** tratante (si no fue asignado durante el Escenario 29). |
 | **Médico** (Sujeto LEL) | Asigna uno de sus **cupones** disponibles a un **paciente** que atiende. |
 | **Paciente** (Sujeto LEL) | Aplica el **cupón** (código o QR) en el momento de **pagar presupuesto**. |
-| **Router HTTP** (`cupones.py` / `pagos.py`) | Valida sesión, rol (`GERENTE_MEDICO`, `MEDICO`, `PACIENTE`) y estructura de los payloads. |
-| **Servicio de Cupones y Pagos** (`cupon_service.py` / `pago_service.py`) | Ejecuta las reglas de asignación, cálculo acumulado de descuento + cobertura de **obra social**, coordinación con la **API de cupones** y atomicidad transaccional. |
-| **Cliente API de Cupones** (`cupones_client.py`) | Consulta vigencia (`GET /external/vouchers/{codigo}/vigencia`) y notifica el uso/vencimiento (`POST /external/vouchers/{codigo}/consumir`). |
-| **Repositorio** (`cupon_repo.py` / `economia_repo.py`) | Lee y actualiza `cupones`, `presupuestos`, `estudios`, `obras_sociales` e inserta en `pagos` usando bloqueo pesimista (`FOR UPDATE`) para evitar doble uso concurrente. |
+| **Router HTTP** (`app/src/web/api/cupones.py` / `app/src/web/api/pagos.py`) | Valida sesión, rol (`GERENTE_MEDICO`, `MEDICO`, `PACIENTE`) y estructura de los payloads. |
+| **Servicio de Cupones y Pagos** (`app/src/core/services/cupon_service.py` / `economia_service.py`) | Reglas de asignación, cálculo del descuento acumulado, coordinación con la **API de cupones** y **MercadoPago**, atomicidad. |
+| **Cliente API de Cupones** (`app/src/clients/cupones_client.py`) | `POST /asignar_cupon_a_medico`, `POST /asignar_cupon_a_paciente`, `POST /canjear_cupon` (header `X-API-Key`). |
+| **Repositorio** (`app/src/core/repos/cupon_repo.py` / `economia_repo.py`) | Lee y actualiza `cupones`, `presupuestos`, `pagos`, `cuotas`, `estudios` y `obras_sociales` con bloqueo `FOR UPDATE`. |
 | **PostgreSQL** (`db`) | Garantiza integridad referencial y aislamiento transaccional. |
 
 ---
@@ -73,43 +72,34 @@
 
 ## Trigger
 
-1. **Asignación a paciente (Episodio 1):** El **médico** selecciona un **cupón** de su cartera y lo asigna a un **paciente** vía `PATCH /api/cupones/{cupon_id}/asignar-paciente` (precedido opcionalmente por `PATCH /api/cupones/{cupon_id}/asignar-medico` ejecutado por el **gerente médico**).
-2. **Aplicación al pagar (Episodios 2-5):** El **paciente** confirma el pago del **presupuesto** enviando `POST /api/estudios/{estudio_id}/pagos` con el campo `codigo_cupon`.
+1. **Asignación:** El **gerente médico** asigna el **cupón** a un **médico** (`PATCH /api/v1/cupones/{cupon_id}/asignar-medico`). El **médico** lo asigna a un **paciente** (`PATCH /api/v1/cupones/{cupon_id}/asignar-paciente`).
+2. **Aplicación al pagar:** El **paciente** envía `POST /api/v1/estudios/{estudio_id}/pagos` con `codigo_cupon` y `cantidad_cuotas`. La confirmación llega por `POST /api/v1/webhooks/mercadopago`.
 
 ---
 
 ## Workflow Tree
 
 ### STEP 1: Asignación del cupón al médico y del médico al paciente
-**Actor**: **Gerente médico** / **Médico** -> Router (`cupones.py`) -> Servicio (`cupon_service.py`) -> Repositorio (`cupon_repo.py`)
-**Action**:
-  1. *(Si `cupon.medico_id` es `NULL`)*: El **gerente médico** asigna el **cupón** al **médico** (`PATCH /api/cupones/{cupon_id}/asignar-medico`).
-  2. El **médico** tratante asigna el **cupón** (`cupon.medico_id == medico_actual.id`, `cupon.usado == False`, `cupon.paciente_id == NULL`) al **paciente** (`PATCH /api/cupones/{cupon_id}/asignar-paciente`), actualizando `cupones.paciente_id = paciente.id` y creando un `Aviso` (`CanalAviso.APP`) para informar al **paciente** que dispone de un **cupón** de descuento.
-**Timeout**: `2s`
-**Input**:
-```json
-{
-  "cupon_id": 105,
-  "medico_autenticado_id": 12,
-  "paciente_id": 45
-}
-```
-**Output on SUCCESS**: `{ cupon_id: 105, medico_id: 12, paciente_id: 45, usado: False }` -> GO TO STEP 2 (cuando el paciente inicia el pago)
+**Actor**: **Gerente médico** / **Médico** -> Router (`cupones.py`) -> `cupon_service` -> `cupones_client` + `cupon_repo`
+
+**1A – Gerente médico asigna a médico** (`PATCH /api/v1/cupones/{cupon_id}/asignar-medico`, body `{ "medico_id": 12 }`):
+  1. Verifica que `cupon.gerente_id == gerente.id`, `cupon.medico_id IS NULL`, `cupon.usado == False` y que exista el `medico_id`.
+  2. Llama a `cupones_client.asignar_cupon_a_medico(gerente_id=str(gerente.id), medico_id=str(medico.id), codigo=cupon.codigo)`.
+  3. Actualiza `cupones.medico_id` y hace `COMMIT`.
+
+**1B – Médico asigna a paciente** (`PATCH /api/v1/cupones/{cupon_id}/asignar-paciente`, body `{ "paciente_id": 45 }`):
+  1. Verifica que `cupon.medico_id == medico_actual.id`, `cupon.paciente_id IS NULL`, `cupon.usado == False` y `cupon.vigente_hasta > now()`. También verifica que el **paciente** esté vinculado al **médico** y que **no tenga otro cupón** registrado (regla de la API: un cupón por paciente por grupo, aunque esté usado).
+  2. Llama a `cupones_client.asignar_cupon_a_paciente(medico_id=str(medico.id), paciente_id=str(paciente.id), codigo=cupon.codigo)`.
+  3. Actualiza `cupones.paciente_id`, crea un `Aviso` (`CanalAviso.APP`) para el **paciente** y hace `COMMIT`.
+
+**Timeout**: `15s` (llamada externa). Sin reintentos automáticos.
+**Output on SUCCESS**: `200 OK` con el cupón actualizado.
 **Output on FAILURE**:
-  - `FAILURE(forbidden)`: El usuario no es el **médico** titular del **cupón** (`cupon.medico_id != medico.id`) o el **paciente** no es atendido por dicho **médico** -> retornar `403 Forbidden` (`CUPON_NO_PERTENECE_AL_MEDICO` / `PACIENTE_NO_VINCULADO`).
-  - `FAILURE(invalid_state)`: El **cupón** ya fue usado (`cupon.usado == True`) o ya está asignado a otro **paciente** (`cupon.paciente_id is not None`) -> retornar `409 Conflict` (`CUPON_YA_ASIGNADO_O_USADO`).
-  - `FAILURE(validation_error)`: `cupon_id` o `paciente_id` inexistentes -> retornar `404 Not Found`.
-
-**Observable states during this step**:
-  - Customer/Actor sees:
-    - **Médico**: El **cupón** figura como "Asignado al paciente `<nombre apellido>`".
-    - **Paciente**: Ve el **cupón** disponible y un **aviso** en su bandeja de entrada.
-  - Operator sees: Actualización de `cupones.paciente_id` en base de datos.
-  - Database:
-    - `cupones`: `medico_id = 12`, `paciente_id = 45`, `usado = False`, `updated_at = now()`.
-    - `avisos`: nueva fila para `paciente.usuario_id` informando el código de cupón asignado.
-  - Logs: `[cupon_service] step=1_asignar_paciente cupon_id=105 medico_id=12 paciente_id=45`
-
+  - `FAILURE(forbidden)`: Gerente que no emitió el cupón, o médico que no es su titular -> `403` (`CUPON_NO_PERTENECE_AL_MEDICO`). Paciente no atendido por el médico -> `403` (`PACIENTE_NO_VINCULADO`).
+  - `FAILURE(not_found)`: `cupon_id`, `medico_id` o `paciente_id` inexistentes -> `404` (`CUPON_NO_ENCONTRADO` / `MEDICO_NO_ENCONTRADO` / `PACIENTE_NO_ENCONTRADO`).
+  - `FAILURE(invalid_state)`: Cupón usado, ya asignado o vencido -> `409` (`CUPON_YA_ASIGNADO_O_USADO`). Paciente con cupón previo (local o `409` de la API) -> `409` (`PACIENTE_YA_TIENE_CUPON`).
+  - `FAILURE(external)`: API con timeout o conexión fallida -> `503`; API con 5xx -> `502` (`CUPONES_API_NO_DISPONIBLE`, retryable). API con 400/404 -> `502` (`CUPONES_API_RECHAZO`).
+  - `FAILURE(database_error)` después de que la API aceptó la asignación -> `rollback`, log `CRITICAL CUPON_DESYNC_ALERT` y `500` (`DB_ERROR`).
 ---
 
 ### STEP 2: Inicio de pago del presupuesto y bloqueo local del cupón
@@ -121,7 +111,8 @@
 {
   "estudio_id": 88,
   "paciente_autenticado_id": 45,
-  "codigo_cupon": "EXOMA-2026-88412"
+  "codigo_cupon": "EXOMA-2026-88412",
+  "cantidad_cuotas": 3 
 }
 ```
 **Output on SUCCESS**: `{ estudio: Estudio, presupuesto: Presupuesto, cupon: Cupon }` -> GO TO STEP 3
@@ -142,91 +133,47 @@
 
 ---
 
-### STEP 3: Consulta de vigencia del cupón en la API de cupones
-**Actor**: Servicio (`pago_service.py`) -> Cliente API de Cupones (`cupones_client.py`) -> **API de cupones**
-**Action**: Consulta `GET /external/vouchers/{codigo}/vigencia` en la **API de cupones** para confirmar que el **cupón** sigue vigente y no ha expirado ni sido revocado externamente.
-**Timeout**: `4s` por intento (hasta 2 reintentos con backoff de `0.4s`, `0.8s`).
-**Input**: `{ codigo: "EXOMA-2026-88412" }`
-**Output on SUCCESS**: `{ codigo: "EXOMA-2026-88412", vigente: True, descuento_porcentaje: Decimal("25.00") }` -> GO TO STEP 4
+### STEP 3: Validación de vigencia del cupón (sin consumirlo)
+**Actor**: Servicio (`economia_service.py`)
+**Action**: Verifica `cupon.vigente_hasta > now()`. **No llama a `canjear_cupon` todavía**, porque eso vence el cupón y el pago todavía no está confirmado. La **API de cupones** no tiene un endpoint de consulta por código. La validación definitiva la hace `canjear_cupon` en `STEP 5`.
+**Output on SUCCESS**: `{ cupon, descuento_porcentaje }` -> GO TO STEP 4
 **Output on FAILURE**:
-  - `FAILURE(invalid_state / cupón vencido)`: La **API de cupones** responde `vigente == False` (expirado o ya usado) -> retornar `409 Conflict` (`CUPON_NO_VIGENTE`, `retryable=False`), sin registrar el pago.
-  - `FAILURE(timeout)`: Timeout tras reintentos -> retornar `504 Gateway Timeout` (`CUPONES_API_TIMEOUT`, `retryable=True`), liberando la transacción sin aplicar cargos.
-  - `FAILURE(transient_external_error)`: Error `5xx` en la **API de cupones** -> retornar `502 Bad Gateway` (`CUPONES_API_UNAVAILABLE`, `retryable=True`).
-
-**Observable states during this step**:
-  - Customer/Actor (**Paciente**) sees: Indicador "Verificando vigencia del cupón...".
-  - Operator sees: Request `GET /external/vouchers/EXOMA-2026-88412/vigencia`.
-  - Database: Sin cambios persistidos.
-  - Logs: `[cupones_client] step=3_consulta_vigencia codigo=EXOMA-2026-88412 vigente=true`
-
+  - `FAILURE(invalid_state)`: `vigente_hasta <= now()` -> `409` (`CUPON_NO_VIGENTE`, `retryable=False`), sin crear `Pago`.
 ---
 
-### STEP 4: Cálculo del descuento acumulado (Obra social + Cupón) y consumo en API de cupones
-**Actor**: Servicio (`pago_service.py`) -> Cliente API de Cupones (`cupones_client.py`) -> **API de cupones**
+### STEP 4: Cálculo del descuento acumulado y creación del Pago pendiente
+**Actor**: Servicio (`economia_service.py`) -> `economia_repo` + `mercadopago_client` (ver Escenario 06, STEP 3)
 **Action**:
-  1. Calcula la cobertura de la **obra social** (si el `Estudio` tiene `obra_social_id` autorizada):
-     `cobertura_obra_social_usd = round(presupuesto.monto_total_usd * (obra_social.porcentaje_cobertura / 100), 2)` (o `0.00` si es pago particular sin cobertura).
-  2. Calcula el descuento del **cupón** acumulable con la **obra social**:
-     `descuento_bruto_usd = round(presupuesto.monto_total_usd * (cupon.descuento_porcentaje / 100), 2)`
-     `remanente_tras_os = presupuesto.monto_total_usd - cobertura_obra_social_usd`
-     `descuento_cupon_usd = min(descuento_bruto_usd, remanente_tras_os)`
-     `monto_usd = max(Decimal("0.00"), presupuesto.monto_total_usd - cobertura_obra_social_usd - descuento_cupon_usd)`
-  3. Envía `POST /external/vouchers/{codigo}/consumir` a la **API de cupones** para notificar que el **cupón** fue usado y que venza inmediatamente.
-**Timeout**: `4s` por intento (hasta 2 reintentos en caso de fallo de red).
-**Input**:
-```json
-{
-  "codigo": "EXOMA-2026-88412",
-  "estudio_id": 88,
-  "presupuesto_id": 51,
-  "monto_total_usd": "500.00",
-  "cobertura_obra_social_usd": "200.00",
-  "descuento_cupon_usd": "125.00",
-  "monto_final_paciente_usd": "175.00"
-}
-```
-**Output on SUCCESS**: `{ consumido_en_api: True, timestamp_vencimiento: datetime }` -> GO TO STEP 5
-**Output on FAILURE**:
-  - `FAILURE(conflict)`: La **API de cupones** devuelve `409 Conflict` porque el cupón acaba de ser consumido en otra petición -> abortar sin crear `Pago`, retornar `409 Conflict` (`CUPON_YA_CONSUMIDO`).
-  - `FAILURE(timeout / external_error)`: Fallo al vencer el cupón en la **API de cupones** -> abortar antes de persistir el `Pago` y retornar `502`/`504` (`retryable=True`) para mantener consistencia estricta entre la API externa y la base de datos local.
-
-**Observable states during this step**:
-  - Customer/Actor (**Paciente**) sees: Desglose de importes ("Aplicando descuento del cupón y registrando pago...").
-  - Operator sees: Llamada `POST /external/vouchers/EXOMA-2026-88412/consumir` exitosa.
-  - Database: El **cupón** ya figura vencido en la **API de cupones**; pendiente de `COMMIT` en PostgreSQL en `STEP 5`.
-  - Logs: `[pago_service] step=4_calculo_y_consumo estudio_id=88 total=500.00 os=200.00 cupon=125.00 neto=175.00`
+  1. `cobertura_obra_social_usd = round(monto_total_usd * porcentaje_cobertura / 100, 2)` (`0.00` si es particular).
+  2. `descuento_bruto_usd = round(monto_total_usd * cupon.descuento_porcentaje / 100, 2)`
+     `descuento_cupon_usd = min(descuento_bruto_usd, monto_total_usd - cobertura_obra_social_usd)`
+     `monto_usd = max(0.00, monto_total_usd - cobertura_obra_social_usd - descuento_cupon_usd)`
+  3. Divide `monto_usd` en `cantidad_cuotas` e inserta `Pago` (`estado = PENDIENTE`, `cupon_id`, `descuento_cupon_usd`, `cobertura_obra_social_usd`) y las `Cuotas`. Después crea la preferencia de **MercadoPago** para la cuota #1.
+  4. Si `monto_usd == 0.00` (cobertura + cupón llegan al 100%): no pasa por **MercadoPago** y va directo a `STEP 5`.
+**Output on SUCCESS**: `201` con `{ pago_id, init_point, cuotas, descuento_cupon_usd, ... }`. El cupón sigue `usado = False`.
+**Output on FAILURE**: Los del Escenario 06, STEP 3 (MercadoPago o base de datos), con `rollback`. El cupón no se toca.
 
 ---
 
-### STEP 5: Persistencia atómica del Pago y marcación del Cupón como usado
-**Actor**: Servicio (`pago_service.py`) -> Repositorio (`economia_repo.py`) -> PostgreSQL
-**Action**: En una única transacción en PostgreSQL:
-  1. Inserta una fila en `pagos` con `presupuesto_id`, `tipo = TipoPago.PARTICULAR` (o `TipoPago.OBRA_SOCIAL` según corresponda), `monto_usd`, `cupon_id = cupon.id`, `descuento_cupon_usd`, `cobertura_obra_social_usd`, `anulado = False`, `fecha = now()`.
-  2. Actualiza la fila en `cupones`: `usado = True`, `usado_en = now()`.
-  3. Ejecuta `COMMIT`.
-**Timeout**: `3s`
-**Input**: `{ presupuesto_id: 51, cupon_id: 105, monto_usd: Decimal("175.00"), descuento_cupon_usd: Decimal("125.00"), cobertura_obra_social_usd: Decimal("200.00") }`
-**Output on SUCCESS**: `{ pago: Pago, cupon: Cupon, habilitado_sacar_turno: True }` -> Retornar `201 Created` al **paciente** (FIN DEL WORKFLOW).
+### STEP 5: Confirmación del pago y canje del cupón
+**Actor**: **MercadoPago** -> `POST /api/v1/webhooks/mercadopago` -> `economia_service` -> `cupones_client` + `economia_repo` (ver Escenario 06, STEP 4)
+**Action**: Cuando el webhook verifica el pago `approved` de la cuota #1 (o cuando el monto es `0.00` en `STEP 4`):
+  1. Si `pago.cupon_id` existe y `cupon.usado == False`: llama a `cupones_client.canjear_cupon(paciente_id=str(paciente.id), codigo=cupon.codigo)`.
+  2. Marca `cupones.usado = True` y `usado_en = now()`, actualiza `Pago`/`Cuota` según el Escenario 06 y hace `COMMIT`.
+  3. Es idempotente: si `cupon.usado == True` (webhook duplicado), no vuelve a canjear.
+**Output on SUCCESS**: `200 OK` a **MercadoPago**. El **paciente** queda habilitado para **Sacar turno**.
 **Output on FAILURE**:
-  - `FAILURE(database_error / timeout)`: Falla el `COMMIT` en PostgreSQL luego de haber vencido el cupón en la **API de cupones** -> ejecutar `ABORT_CLEANUP`.
-
-**Observable states during this step**:
-  - Customer/Actor (**Paciente**) sees: Comprobante de pago con el monto total, cobertura de **obra social**, descuento del **cupón**, monto final abonado y botón habilitado para **Sacar turno**.
-  - Operator sees: Registro financiero en `pagos` con `anulado = False` y `cupones.usado = True`.
-  - Database:
-    - Tabla `pagos`: nueva fila con `presupuesto_id`, `tipo`, `monto_usd`, `cupon_id`, `descuento_cupon_usd`, `cobertura_obra_social_usd`, `anulado = False`, `fecha`.
-    - Tabla `cupones`: `usado = True`, `usado_en = now()`, `updated_at = now()`.
-    - Tabla `estudios`: `estado` permanece en `EstadoEstudio.CREADO` (o `EstadoEstudio.AUTORIZADO`) y queda habilitado para pasar a `EstadoEstudio.TURNO_SACADO` cuando el **paciente** reserve su **turno**.
-  - Logs: `[economia_repo] step=5_pago_registrado pago_id=<id> estudio_id=88 cupon_id=105 monto_usd=175.00`
+  - `FAILURE(transient)`: API de cupones con timeout o 5xx -> `rollback` y `503` a **MercadoPago** para que reintente el webhook.
+  - `FAILURE(cupón rechazado por la API: 400 vencido / 409 ya usado)`: el pago ya fue cobrado con descuento, así que **no se revierte**. Se marca `usado = True` igual y se emite log `CRITICAL VOUCHER_DESYNC_ALERT` para conciliación.
 
 ---
 
 ### ABORT_CLEANUP: Reversión ante fallo en STEP 5 tras consumir cupón en API externa
 **Triggered by**: Error de base de datos en `STEP 5` después de que `STEP 4` consumió el **cupón** en la **API de cupones**.
 **Actions** (in order):
-  1. Ejecutar `db.session.rollback()` para revertir cualquier inserción parcial en `pagos` y actualización en `cupones`.
-  2. Invocar `cupones_client.restaurar_cupon(codigo)` (`POST /external/vouchers/{codigo}/restaurar`) en la **API de cupones** para rehabilitar la vigencia del cupón que no llegó a aplicarse en un pago persistido.
-  3. Si la restauración externa falla, emitir log `CRITICAL` (`VOUCHER_DESYNC_ALERT`) con `cupon_id`, `codigo`, `paciente_id` y `estudio_id` para intervención de soporte.
+  1. `db.session.rollback()`.
+  2. Si `canjear_cupon` ya respondió OK pero falla el `COMMIT`: el reintento del webhook vuelve a llamar a `canjear_cupon`, que responde `409` (ya usado). Ese `409` se toma como "ya canjeado" y se marca `usado = True` localmente. La **API de cupones** no ofrece `/restaurar`.
+  3. Cualquier otra inconsistencia: log `CRITICAL VOUCHER_DESYNC_ALERT` con `cupon_id`, `codigo`, `paciente_id` y `estudio_id`.
 **What customer/actor (**Paciente**) sees**: Mensaje de error indicando que el pago no pudo completarse y que no se realizó ningún cargo; su cupón permanece asignado.
 **What operator sees**: Alerta `VOUCHER_DESYNC_ALERT` o confirmación de compensación exitosa en logs.
 
@@ -235,11 +182,12 @@
 ## State Transitions
 
 ```
-Cupon (cupones):
-  [Creado (medico_id=NULL, paciente_id=NULL, usado=False)]
-    -- (Gerente médico asigna a médico) --> [Asignado a Médico (medico_id=<M>, paciente_id=NULL, usado=False)]
-    -- (Médico asigna a paciente - STEP 1) --> [Asignado a Paciente (medico_id=<M>, paciente_id=<P>, usado=False)]
-    -- (Paciente paga presupuesto aplicando cupón - STEP 2 a 5) --> [Usado / Vencido (usado=True, usado_en=now())]
+Cupon (cupones / estado en la API):
+  [Disponible (medico_id=NULL, paciente_id=NULL) / "disponible"]
+    -- (STEP 1A) --> [Asignado a Médico / "medico"]
+    -- (STEP 1B) --> [Asignado a Paciente / "paciente"]
+    -- (STEP 4: pago creado PENDIENTE) --> [Asignado a Paciente (sin cambios)]
+    -- (STEP 5: webhook approved + canjear_cupon) --> [Usado (usado=True, usado_en=now()) / "usado"]
 
 Pago (pagos):
   [Inexistente]
@@ -254,127 +202,24 @@ Estudio (estudios.estado):
 
 ## Handoff Contracts
 
-### 1. Médico -> Backend: Asignar cupón a paciente
-**Endpoint**: `PATCH /api/cupones/{cupon_id}/asignar-paciente`
-**Payload**:
-```json
-{
-  "paciente_id": 45
-}
-```
-**Success response** (`200 OK`):
-```json
-{
-  "ok": true,
-  "data": {
-    "id": 105,
-    "codigo": "EXOMA-2026-88412",
-    "descuento_porcentaje": 25.00,
-    "gerente_id": 4,
-    "medico_id": 12,
-    "paciente_id": 45,
-    "usado": false,
-    "vigente_hasta": "2026-12-31T23:59:59Z"
-  }
-}
-```
-**Failure response** (`403` / `404` / `409`):
-```json
-{
-  "ok": false,
-  "error": "El cupón ya fue asignado a un paciente o ya fue utilizado.",
-  "code": "CUPON_YA_ASIGNADO_O_USADO",
-  "retryable": false
-}
-```
-**Timeout**: `5s`
-**ON FAILURE**: No modificar `cupones.paciente_id`; informar al **médico** en la interfaz.
+### 1A. Gerente médico -> Backend: `PATCH /api/v1/cupones/{cupon_id}/asignar-medico`
+**Payload**: `{ "medico_id": 12 }` -> **200**: `{ "ok": true, "data": { "id": 105, "codigo": "53399388", "medico_id": 12, "paciente_id": null, "usado": false, ... } }`
 
----
+### 1B. Médico -> Backend: `PATCH /api/v1/cupones/{cupon_id}/asignar-paciente`
+**Payload**: `{ "paciente_id": 45 }` -> **200**: `{ "ok": true, "data": { "id": 105, "codigo": "53399388", "medico_id": 12, "paciente_id": 45, "usado": false, ... } }`
+**Failure**: `{ "ok": false, "error": "...", "code": "PACIENTE_YA_TIENE_CUPON", "retryable": false }`
 
-### 2. Paciente -> Backend: Pagar presupuesto aplicando cupón
-**Endpoint**: `POST /api/estudios/{estudio_id}/pagos`
-**Payload**:
-```json
-{
-  "codigo_cupon": "EXOMA-2026-88412"
-}
-```
-**Success response** (`201 Created`):
-```json
-{
-  "ok": true,
-  "data": {
-    "pago_id": 301,
-    "estudio_id": 88,
-    "presupuesto_id": 51,
-    "tipo": "particular",
-    "monto_total_presupuesto_usd": 500.00,
-    "cobertura_obra_social_usd": 200.00,
-    "descuento_cupon_usd": 125.00,
-    "monto_usd": 175.00,
-    "cupon_id": 105,
-    "codigo_cupon": "EXOMA-2026-88412",
-    "anulado": false,
-    "fecha": "2026-10-28T20:05:12Z",
-    "habilitado_sacar_turno": true
-  }
-}
-```
-**Failure response** (`403` / `404` / `409` / `422` / `502` / `504`):
-```json
-{
-  "ok": false,
-  "error": "El cupón informado ya no se encuentra vigente según la API de cupones.",
-  "code": "CUPON_NO_VIGENTE",
-  "retryable": false
-}
-```
-**Timeout**: `10s`
-**ON FAILURE**: Si `retryable == true`, permitir al **paciente** reintentar el pago; si el cupón no es vigente, permitir pagar sin cupón o ingresar otro código.
+### 2. Paciente -> Backend: `POST /api/v1/estudios/{estudio_id}/pagos`
+**Payload**: `{ "cantidad_cuotas": 3, "codigo_cupon": "53399388" }`
+**201**: `{ "ok": true, "data": { "pago_id": 301, "estado": "pendiente", "monto_total_presupuesto_usd": 500.00, "cobertura_obra_social_usd": 200.00, "descuento_cupon_usd": 125.00, "monto_usd": 175.00, "cupon_id": 105, "init_point": "https://...", "cuotas": [...] } }`
 
----
-
-### 3. Backend (`cupones_client`) -> API de cupones (Validación y Consumo)
-**Endpoint 3A (Consultar vigencia)**: `GET /external/vouchers/{codigo}/vigencia`
-**Success response** (`200 OK`):
-```json
-{
-  "codigo": "EXOMA-2026-88412",
-  "vigente": true,
-  "descuento_porcentaje": 25.00,
-  "vigente_hasta": "2026-12-31T23:59:59Z"
-}
-```
-**Endpoint 3B (Consumir / Vencer cupón)**: `POST /external/vouchers/{codigo}/consumir`
-**Payload**:
-```json
-{
-  "usado_en": "2026-10-28T20:05:11Z",
-  "estudio_id": 88,
-  "paciente_id": 45
-}
-```
-**Success response** (`200 OK`):
-```json
-{
-  "codigo": "EXOMA-2026-88412",
-  "vigente": false,
-  "usado": true,
-  "usado_en": "2026-10-28T20:05:11Z"
-}
-```
-**Failure response**:
-```json
-{
-  "ok": false,
-  "error": "El cupón ya se encuentra vencido o utilizado",
-  "code": "CUPON_NO_VIGENTE",
-  "retryable": false
-}
-```
-**Timeout**: `4s` por llamada.
-**ON FAILURE**: Abortar el registro de `Pago` en PostgreSQL y devolver error controlado al cliente.
+### 3. Backend (`cupones_client`) -> API de cupones (header `X-API-Key`)
+| Operación | Endpoint | Payload | OK |
+|---|---|---|---|
+| Asignar a médico | `POST /asignar_cupon_a_medico` | `{ "p_gerente_id": "4", "p_medico_id": "12", "p_codigo": "53399388" }` | `200 true` |
+| Asignar a paciente | `POST /asignar_cupon_a_paciente` | `{ "p_medico_id": "12", "p_paciente_id": "45", "p_codigo": "53399388" }` | `200 true` (`409` si el paciente ya tiene cupón) |
+| Canjear | `POST /canjear_cupon` | `{ "p_paciente_id": "45", "p_codigo": "53399388" }` | `200 true` (`400` vencido, `409` ya usado) |
+**Timeout**: `15s`. Sin reintentos automáticos de escritura.
 
 ---
 
@@ -382,9 +227,9 @@ Estudio (estudios.estado):
 
 | Resource | Created at step | Destroyed by | Destroy method |
 |---|---|---|---|
-| Marcación de consumo en **API de cupones** (`vigente = false`) | Step 4 | `ABORT_CLEANUP` | `POST /external/vouchers/{codigo}/restaurar` vía `cupones_client` + alerta `VOUCHER_DESYNC_ALERT` si falla |
-| Fila en `pagos` y cambio `cupones.usado = True` (en sesión SQLAlchemy) | Step 5 | `ABORT_CLEANUP` | `db.session.rollback()` |
-
+| Asignación en la **API de cupones** (1A/1B) | Step 1 | — | Sin desasignación en la API: log `CRITICAL CUPON_DESYNC_ALERT` si falla el commit local |
+| `Pago` `PENDIENTE` + `Cuotas` | Step 4 | `rollback` | `db.session.rollback()` |
+| Canje en la **API de cupones** | Step 5 | — | Sin `/restaurar`: el reintento del webhook trata el `409` como "ya canjeado" |
 ---
 
 ## Reality Checker Findings
@@ -394,6 +239,8 @@ Estudio (estudios.estado):
 | RC-1 | El modelo `Pago` en `app/src/core/models/economia.py` ya incluye `cupon_id`, `descuento_cupon_usd` y `cobertura_obra_social_usd`, soportando de forma nativa la acumulación entre descuento de **cupón** y cobertura de **obra social**. | Low | STEP 4, STEP 5 | La especificación mapea exactamente los 3 importes (`monto_usd`, `descuento_cupon_usd`, `cobertura_obra_social_usd`) sobre `Pago`. |
 | RC-2 | El LEL establece que `EstadoEstudio` solo pasa a `Turno sacado` cuando el **paciente** reserva el **turno** (`Sacar turno`), no al pagar. | Medium | State Transitions, STEP 5 | Confirmado: el pago con cupón inserta en `pagos` (`anulado = False`) y habilita la acción `Sacar turno`, manteniendo `Estudio.estado` en `Creado` (o `Autorizado`) hasta que el paciente elija su turno. |
 | RC-3 | Si la suma de `ObraSocial.porcentaje_cobertura` + `Cupon.descuento_porcentaje` supera el `100%`, el monto a pagar no debe ser negativo. | Medium | STEP 4 | Se especificó `descuento_cupon_usd = min(descuento_bruto_usd, remanente_tras_os)` y `monto_usd >= 0.00`. |
+| RC-4 | La **API de cupones** real no tiene `/vigencia`, `/consumir` ni `/restaurar`. Expone `asignar_cupon_a_medico`, `asignar_cupon_a_paciente` y `canjear_cupon`, y permite un solo cupón por paciente por grupo. | High | STEP 1, 3, 4, 5, ABORT_CLEANUP, Handoff | La vigencia se valida en local con `vigente_hasta` y el canje se hace en el webhook `approved` (Esc. 06 v2.0, ADR-001). Se agregó `PACIENTE_YA_TIENE_CUPON`. |
+| RC-5 | La v1.1 se contradecía: el resumen canjeaba en el webhook y el STEP 4 consumía antes del pago. | High | STEP 4, STEP 5 | Unificado: se canjea solo en el webhook `approved`. |
 
 ---
 
@@ -401,14 +248,20 @@ Estudio (estudios.estado):
 
 | Test | Trigger | Expected behavior |
 |---|---|---|
-| `TC-01`: Happy path – Asignación de cupón por el médico al paciente | `PATCH /api/cupones/{id}/asignar-paciente` por el médico titular del cupón | Retorna `200 OK`, actualiza `cupones.paciente_id = paciente.id` y genera `Aviso` para el paciente. |
-| `TC-02`: Happy path – Pago particular aplicando cupón vigente | `POST /api/estudios/{id}/pagos` con `codigo_cupon` de `20%` sobre presupuesto de `500 USD` (sin obra social) | Consulta vigencia y vence cupón en **API de cupones**; crea `Pago` con `descuento_cupon_usd=100.00`, `cobertura_obra_social_usd=0.00`, `monto_usd=400.00`, y marca `cupones.usado=True`. |
-| `TC-03`: Happy path – Acumulación de cupón con cobertura de obra social | `POST /api/estudios/{id}/pagos` con `ObraSocial` al `40%` (`200 USD`) + `Cupon` al `25%` (`125 USD`) sobre presupuesto de `500 USD` | Crea `Pago` con `cobertura_obra_social_usd=200.00`, `descuento_cupon_usd=125.00` y `monto_usd=175.00`; marca `cupones.usado=True`. |
-| `TC-04`: Tope del 100% cuando cupón + obra social superan el total | `ObraSocial` cubre `80%` (`400 USD`) y `Cupon` es de `50%` (`250 USD` teóricos) sobre `500 USD` | `cobertura_obra_social_usd=400.00`, `descuento_cupon_usd=100.00` (topeado al remanente), `monto_usd=0.00` (nunca negativo). |
-| `TC-05`: Rechazo por intentar usar un cupón asignado a otro paciente | `POST /api/estudios/{id}/pagos` con `codigo_cupon` cuyo `cupon.paciente_id` pertenece a otro paciente | Retorna `403 Forbidden` (`CUPON_AJENO`), no llama a la **API de cupones** ni crea fila en `pagos`. |
-| `TC-06`: Rechazo cuando la API de cupones informa que el cupón no está vigente | `POST /api/estudios/{id}/pagos` cuando `GET /external/vouchers/{codigo}/vigencia` devuelve `vigente=False` | Retorna `409 Conflict` (`CUPON_NO_VIGENTE`), no invoca `/consumir` ni inserta en `pagos`. |
-| `TC-07`: Intento de reutilizar un cupón ya usado (`cupon.usado == True`) | Segundo `POST /api/estudios/{id}/pagos` con el mismo `codigo_cupon` | Retorna `409 Conflict` (`CUPON_YA_UTILIZADO`) en `STEP 2` antes de contactar a la API externa. |
-| `TC-08`: Fallo de BD en `STEP 5` ejecuta compensación en `ABORT_CLEANUP` | Simulación de `OperationalError` al hacer `commit()` en `pagos` tras consumir el cupón en `STEP 4` | Se hace `rollback()` en BD, se invoca `restaurar_cupon` en `cupones_client` y no queda pago huérfano. |
+| `TC-01` | Gerente asigna su cupón disponible a un médico | `200`, llama a `asignar_cupon_a_medico`, `cupones.medico_id` seteado |
+| `TC-02` | Médico titular asigna el cupón a su paciente | `200`, llama a `asignar_cupon_a_paciente`, `paciente_id` seteado, crea `Aviso` |
+| `TC-03` | Médico que no es titular intenta asignar | `403 CUPON_NO_PERTENECE_AL_MEDICO`, no llama a la API |
+| `TC-04` | Paciente que ya tiene un cupón (local o `409` de la API) | `409 PACIENTE_YA_TIENE_CUPON` |
+| `TC-05` | Pago particular de 500 USD con cupón de 20% | `201`, `Pago PENDIENTE` con `descuento_cupon_usd=100.00` y `monto_usd=400.00`. Cupón **sigue** `usado=False` y **no** se llama a `canjear_cupon` |
+| `TC-06` | Obra social 40% + cupón 25% sobre 500 USD | `cobertura=200.00`, `descuento=125.00`, `monto_usd=175.00` |
+| `TC-07` | Obra social 80% + cupón 50% sobre 500 USD | `cobertura=400.00`, `descuento=100.00` (tope), `monto_usd=0.00` -> canje directo sin MercadoPago |
+| `TC-08` | `codigo_cupon` asignado a otro paciente | `403 CUPON_AJENO`, sin `Pago` |
+| `TC-09` | Cupón con `vigente_hasta` vencido | `409 CUPON_NO_VIGENTE`, sin `Pago` |
+| `TC-10` | Cupón con `usado=True` | `409 CUPON_YA_UTILIZADO` |
+| `TC-11` | Webhook `approved` de un pago con cupón | Llama a `canjear_cupon` y marca `usado=True` y `usado_en` |
+| `TC-12` | Webhook `approved` duplicado | No vuelve a llamar a `canjear_cupon` |
+| `TC-13` | Webhook `approved` con la API de cupones caída | `503` a MercadoPago, rollback, cupón sigue `usado=False` |
+| `TC-14` | Webhook `approved` y la API responde `409` (ya usado) | Marca `usado=True` y log `VOUCHER_DESYNC_ALERT`. El pago no se revierte |
 
 ---
 
@@ -429,3 +282,4 @@ Estudio (estudios.estado):
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada alineada con `Cupon`, `Presupuesto`, `Pago` y `ObraSocial` en `app/src/core/models/economia.py`. | Aprobada. |
 | 2026-11-17 | Adaptada al flujo de pago en cuotas con `MercadoPago` (Esc. 06 v2.0): descuento prorrateado antes de generar cuotas y consumo del cupón diferido al webhook `approved`. | Actualizada a v1.1. |
+| 2026-11-24 | La spec usaba `/external/vouchers/*` (vigencia, consumir, restaurar), que no existen en la API real, y se contradecía sobre cuándo consumir el cupón. | Actualizada a v1.2: endpoints reales, canje en el webhook `approved`, vigencia local, un cupón por paciente y rutas `/api/v1`. |
