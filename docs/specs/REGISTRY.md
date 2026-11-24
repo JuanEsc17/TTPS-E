@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | 01 | Dar de alta un paciente | 1.1 | Approved | [escenario-01-dar-de-alta-un-paciente.md](./escenario-01-dar-de-alta-un-paciente.md) |
 | 02 | Dar de alta un estudio | 1.1 | Approved | [escenario-02-dar-de-alta-un-estudio.md](./escenario-02-dar-de-alta-un-estudio.md) |
-| 03 | Emitir un presupuesto | 1.1 | Approved | [escenario-03-emitir-un-presupuesto.md](./escenario-03-emitir-un-presupuesto.md) |
+| 03 | Emitir un presupuesto | 1.3 | Approved | [escenario-03-emitir-un-presupuesto.md](./escenario-03-emitir-un-presupuesto.md) |
 | 04 | Autorizar un estudio por obra social | 1.1 | Approved | [escenario-04-autorizar-un-estudio-por-obra-social.md](./escenario-04-autorizar-un-estudio-por-obra-social.md) |
 | 05 | Reautorizar un estudio rechazado | 1.1 | Approved | [escenario-05-reautorizar-un-estudio-rechazado.md](./escenario-05-reautorizar-un-estudio-rechazado.md) |
 | 06 | Pagar un estudio particular *(MercadoPago + Cuotas)* | 2.0 | Approved | [escenario-06-pagar-un-estudio-particular.md](./escenario-06-pagar-un-estudio-particular.md) |
@@ -31,14 +31,14 @@
 | 19 | Registrar un paciente sin información familiar | 1.1 | Approved | [escenario-19-registrar-un-paciente-sin-informacion-familiar.md](./escenario-19-registrar-un-paciente-sin-informacion-familiar.md) |
 | 20 | Cambiar la contraseña inicial | 1.0 | Approved | [escenario-20-cambiar-la-contrasena-inicial.md](./escenario-20-cambiar-la-contrasena-inicial.md) |
 | 21 | Registrar un médico | 1.0 | Approved | [escenario-21-registrar-un-medico.md](./escenario-21-registrar-un-medico.md) |
-| 22 | Registrar un administrativo | 2.0 | Approved | [escenario-22-registrar-un-administrativo.md](./escenario-22-registrar-un-administrativo.md) |
+| 22 | Registrar un administrativo | 2.1 | Approved | [escenario-22-registrar-un-administrativo.md](./escenario-22-registrar-un-administrativo.md) |
 | 23 | Gestionar una patología | 1.0 | Approved | [escenario-23-gestionar-una-patologia.md](./escenario-23-gestionar-una-patologia.md) |
 | 24 | Consultar variantes | 1.0 | Approved | [escenario-24-consultar-variantes.md](./escenario-24-consultar-variantes.md) |
 | 25 | Consultar el chatbot sobre patologías | 1.0 | Approved | [escenario-25-consultar-el-chatbot-sobre-patologias.md](./escenario-25-consultar-el-chatbot-sobre-patologias.md) |
 | 26 | Verificar el ingreso desde una máquina nueva | 1.0 | Approved | [escenario-26-verificar-el-ingreso-desde-una-maquina-nueva.md](./escenario-26-verificar-el-ingreso-desde-una-maquina-nueva.md) |
 | 27 | Iniciar sesión | 1.0 | Approved | [escenario-27-iniciar-sesion.md](./escenario-27-iniciar-sesion.md) |
 | 28 | Cerrar sesión | 1.0 | Approved | [escenario-28-cerrar-sesion.md](./escenario-28-cerrar-sesion.md) |
-| 29 | Crear un cupón | 1.0 | Approved | [escenario-29-crear-un-cupon.md](./escenario-29-crear-un-cupon.md) |
+| 29 | Crear un cupón | 1.1 | Approved | [escenario-29-crear-un-cupon.md](./escenario-29-crear-un-cupon.md) |
 | 30 | Asignar y aplicar un cupón | 1.1 | Approved | [escenario-30-asignar-y-aplicar-un-cupon.md](./escenario-30-asignar-y-aplicar-un-cupon.md) |
 | 31 | Registrar un gerente médico | 1.0 | Approved | [escenario-31-registrar-un-gerente-medico.md](./escenario-31-registrar-un-gerente-medico.md) |
 | 32 | Seguir una muestra en el mapa | 1.0 | Approved | [escenario-32-seguir-una-muestra-en-el-mapa.md](./escenario-32-seguir-una-muestra-en-el-mapa.md) |
