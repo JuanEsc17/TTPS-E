@@ -11,9 +11,9 @@ Para cada historia o escenario que vayas a desarrollar, seguí este orden:
 ```
 1. Especificar (docs/specs/)  ──► agency-workflow-architect + agency-software-architect
 2. Modelar DB y Permisos      ──► agency-database-optimizer + agency-identity-access-engineer
-3. Implementar Backend (app/) ──► agency-backend-architect (+ skills de PDF / Audio / Privacidad)
-4. Implementar Frontend       ──► agency-frontend-developer (+ agency-web-gis-developer para mapas)
-5. Testear y Revisar (tests/) ──► agency-api-tester + agency-appsec-engineer + agency-code-reviewer
+3. Implementar Backend (backend/app/) ──► agency-backend-architect (+ skills de PDF / Audio / Privacidad)
+4. Implementar Frontend (frontend/)   ──► agency-frontend-developer (+ agency-web-gis-developer para mapas)
+5. Testear y Revisar (backend/tests/) ──► agency-api-tester + agency-appsec-engineer + agency-code-reviewer
 ```
 
 ---
@@ -35,7 +35,7 @@ Para cada historia o escenario que vayas a desarrollar, seguí este orden:
 #### 2. `agency-software-architect`
 - **Ubicación:** [`.agents/skills/agency-software-architect/SKILL.md`](./skills/agency-software-architect/SKILL.md)
 - **Cuándo conviene usarla:**
-  - Al definir la estructura de módulos y paquetes dentro de `app/` respetando la arquitectura en capas estrictas (`router` → `service` → `repo` + `clients`).
+  - Al definir la estructura de módulos y paquetes dentro de `backend/app/` respetando la arquitectura en capas estrictas (`router` → `service` → `repo` + `clients`).
   - Para mapear los **Sujetos, Objetos y Verbos** de [`.ai/2-Glosario_LEL.md`](../.ai/2-Glosario_LEL.md) a entidades de dominio, DTOs/esquemas y servicios con nombres 100 % en español.
   - Cuando tengas dudas de diseño sobre dónde ubicar una regla de negocio o cómo desacoplar los clientes de las 8 APIs externas.
 - **Ejemplo de prompt:**
@@ -48,8 +48,8 @@ Para cada historia o escenario que vayas a desarrollar, seguí este orden:
 #### 3. `agency-backend-architect`
 - **Ubicación:** [`.agents/skills/agency-backend-architect/SKILL.md`](./skills/agency-backend-architect/SKILL.md)
 - **Cuándo conviene usarla:**
-  - Al implementar endpoints en Flask, validaciones con Marshmallow, servicios de negocio y repositorios SQLAlchemy en `app/`.
-  - Al construir los clientes HTTP (`httpx` / `requests`) en `app/clients/` para comunicarse con las APIs externas: **API de bioinformática**, **SNOMED**, **API de familiograma**, **API de obras sociales**, **API de cupones**, **API del Ministerio de Salud**, **API de optimización de recorridos**, **FedEx** y **Chatbot**.
+  - Al implementar endpoints en Flask, validaciones con Marshmallow, servicios de negocio y repositorios SQLAlchemy en `backend/app/`.
+  - Al construir los clientes HTTP (`httpx` / `requests`) en `backend/app/src/clients/` para comunicarse con las APIs externas: **API de bioinformática**, **SNOMED**, **API de familiograma**, **API de obras sociales**, **API de cupones**, **API del Ministerio de Salud**, **API de optimización de recorridos**, **FedEx** y **Chatbot**.
   - Al diseñar el webhook/receptor del **Bot de Telegram** (Escenario 9) y el callback de retiro de **FedEx** (Escenario 13).
 - **Ejemplo de prompt:**
   > *"Usá `agency-backend-architect` para implementar el servicio y cliente HTTP de la API de cupones (Escenarios 29 y 30) manejando timeouts y errores de red."*
@@ -146,7 +146,7 @@ Para cada historia o escenario que vayas a desarrollar, seguí este orden:
 #### 13. `agency-api-tester`
 - **Ubicación:** [`.agents/skills/agency-api-tester/SKILL.md`](./skills/agency-api-tester/SKILL.md)
 - **Cuándo conviene usarla:**
-  - Al escribir los tests en `tests/` con `poetry run pytest`, asegurando **al menos un test por criterio de aceptación de la spec**.
+  - Al escribir los tests en `backend/tests/` con `poetry run pytest` (desde `backend/`), asegurando **al menos un test por criterio de aceptación de la spec**.
   - Para crear mocks de las APIs externas (`httpx`/`requests`) y probar respuestas exitosas, errores de validación (ej. síntomas que no cumplen 1 síntoma cardinal o 2 secundarios en Escenario 36) y transiciones inválidas de estado.
 - **Ejemplo de prompt:**
   > *"Usá `agency-api-tester` para generar los tests en `pytest` de todos los criterios de aceptación de la spec de alta de paciente y validación de síntomas SNOMED."*
@@ -159,9 +159,9 @@ Para cada historia o escenario que vayas a desarrollar, seguí este orden:
     1. Sin lógica de negocio en `router`.
     2. Sin consultas SQL/ORM fuera de `repo`.
     3. Todos los nombres de dominio en **español** y fieles a [`.ai/2-Glosario_LEL.md`](../.ai/2-Glosario_LEL.md).
-    4. Migraciones previas intactas y código limpio para `poetry run ruff check .`.
+    4. Migraciones previas intactas y código limpio para `poetry run ruff check .` (en `backend/`).
 - **Ejemplo de prompt:**
-  > *"Usá `agency-code-reviewer` para auditar mis cambios en `app/` y `tests/` contra las reglas estrictas de `AGENTS.md` y el Glosario LEL."*
+  > *"Usá `agency-code-reviewer` para auditar mis cambios en `backend/app/` y `backend/tests/` contra las reglas estrictas de `AGENTS.md` y el Glosario LEL."*
 
 ---
 

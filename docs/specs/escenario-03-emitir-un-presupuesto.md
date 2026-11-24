@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 3 – Emitir un presupuesto
-**Versión**: 1.1
-**Fecha**: 2026-11-17
+**Versión**: 1.3
+**Fecha**: 2026-11-23
 **Autor**: Workflow Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-3`
@@ -40,7 +40,7 @@
 | `router` (`presupuestos_router`) | Capa HTTP Flask (`POST /api/v1/estudios/{estudio_id}/presupuesto`). Verifica sesión activa y rol `Rol.ADMINISTRATIVO`. |
 | `service` (`economia_service`) | Capa de negocio que cuenta los `Genes` del `Estudio`, invoca `calcular_precio(cantidad_genes)`, consulta la cobertura de la `Obra social` y persiste el `Presupuesto`. |
 | `repo` (`economia_repo`, `estudio_repo`) | Capa de acceso a datos SQLAlchemy sobre `estudios`, `estudios_genes`, `presupuestos`, `obras_sociales`, `autorizaciones`, `avisos`. |
-| `clients` (`obras_sociales_client`, `notificacion_client`) | Clientes HTTP hacia la `API de obras sociales` (para consultar porcentaje de cobertura y registrar el trámite externo si aplica) y servicio de notificaciones. |
+| `clients` (`ObraSocialClient`, `EmailClient`) | `ObraSocialClient` (`app/src/clients/obra_social_client.py`) hacia la `API de obras sociales` para consultar el porcentaje de cobertura y dar de alta la solicitud de autorización; `EmailClient` (`app/src/clients/email_client.py`) hacia la API de mail para notificar al `Paciente`. Ambos se inyectan vía `app.config["OBRA_SOCIAL_CLIENT"]` / `app.config["EMAIL_CLIENT"]`. |
 | `PostgreSQL` | Base de datos relacional con restricción `UNIQUE(estudio_id)` en la tabla `presupuestos`. |
 
 ---
@@ -63,6 +63,20 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 
 ## Workflow Tree
 
+### STEP 0: Consulta de la bandeja de `Estudios` pendientes de presupuesto
+**Actor**: `router` (`presupuestos_router`) -> `service` (`economia_service`) -> `repo` (`economia_repo`)
+**Action**:
+1. Verifica sesión activa y `Usuario.rol == Rol.ADMINISTRATIVO`.
+2. Lista los `Estudios` con `estado == EstadoEstudio.CREADO` y sin fila en `presupuestos`, ordenados por `es_pompe_urgente DESC, created_at ASC` (los `Pompe urgente` primero, luego los más antiguos).
+3. Para cada `Estudio` devuelve paciente, DNI, médico, patología, `Obra social` (o `null` si es particular), `cantidad_genes` y el desglose estimado con `calcular_precio(cantidad_genes)`.
+4. Filtro opcional `dni` (solo dígitos, coincidencia parcial).
+**Endpoint HTTP**: `GET /api/v1/presupuestos/pendientes?dni=<dni>`
+**Output on SUCCESS**: `200 OK` con la lista -> el `Administrativo` selecciona un `Estudio` -> `GO TO STEP 1`
+**Output on FAILURE**:
+  - `FAILURE(forbidden)`: rol distinto de `Administrativo` -> `403` (`code: "FORBIDDEN_ROLE"`).
+  - `FAILURE(validation_error)`: `dni` con caracteres no numéricos -> `422` (`code: "DNI_INVALIDO"`).
+
+---
 ### STEP 1: Validación de rol del `Administrativo` y estado del `Estudio`
 **Actor**: `router` (`presupuestos_router`) -> `service` (`economia_service`) -> `repo` (`estudio_repo`, `economia_repo`)
 **Action**:
@@ -95,7 +109,8 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
    - `extra = max(0, cantidad_genes - 5)`
    - `monto_total_usd = Decimal("500") + Decimal("30") * extra`
 2. Si `estudio.obra_social_id is not None`:
-   - Consulta la `API de obras sociales` (`GET /api/v1/obras-sociales/{rnos}`) para refrescar el `porcentaje_cobertura` en la tabla local `obras_sociales` y, si la API externa recibe el alta de solicitud de autorización (nombre del paciente + fecha, según comentario en `economia.py` línea 91), envía `POST /api/v1/autorizaciones` para obtener `solicitud_externa_id`.
+   - Consulta la `API de obras sociales` con `ObraSocialClient.listar_obras_sociales(buscar=obra_social.nombre)` (`GET /obras-sociales`) para refrescar el `porcentaje_cobertura` en la tabla local `obras_sociales` y obtener el `id` externo de la obra social.
+   - Da de alta la solicitud de autorización con `ObraSocialClient.crear_solicitud(obra_social_id=<id externo>, paciente_nombre, fecha, referencia_externa=estudio.id)` (`POST /solicitudes`); el campo `id` de la respuesta se guarda como `solicitud_externa_id`.
 **Timeout**: `5s` (con 2 reintentos de `1s` y `2s` hacia la `API de obras sociales`).
 **Input**: `cantidad_genes`, `estudio.obra_social` (opcional), `estudio.paciente`.
 **Output on SUCCESS**: `monto_total_usd`, `porcentaje_cobertura` (si hay obra social) y `solicitud_externa_id` (opcional) -> `GO TO STEP 3`
@@ -110,7 +125,7 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 
 ---
 
-### STEP 3: Persistencia del `Presupuesto`, transición de estado (si tiene `Obra social`) y `Aviso` al `Paciente`
+**Actor**: `service` (`economia_service`) -> `repo` (`economia_repo`, `estudio_repo`, `usuario_repo`) + `clients` (`EmailClient`) -> `PostgreSQL`
 **Actor**: `service` (`economia_service`) -> `repo` (`economia_repo`, `estudio_repo`, `usuario_repo`) -> `PostgreSQL`
 **Action**:
 1. Inserta una fila en la tabla `presupuestos`:
@@ -124,8 +139,9 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
      - Registra la modificación en `registro_modificaciones` (`entidad_tipo = 'estudio'`, `entidad_id = estudio.id`, `accion = 'cambio_estado'`, `cambios = {"estado": {"anterior": "Creado", "nuevo": "Pendiente de autorizacion"}}`).
      - Inserta una fila inicial en `autorizaciones` con `estudio_id = estudio.id`, `resultado = ResultadoAutorizacion.PENDIENTE`, `solicitud_externa_id = solicitud_externa_id`.
    - **Si `estudio.obra_social_id is None` (Pago particular)**:
-     - Mantiene `estudio.estado = EstadoEstudio.CREADO` (a la espera del pago particular en un pago o en cuotas vía `MercadoPago`, o de que el paciente seleccione obra social).
-3. Inserta un `Aviso` en `avisos` para el `Paciente` (`usuario_id = estudio.paciente.usuario_id`, `canal = CanalAviso.APP` y `CanalAviso.MAIL`) informando que el `Presupuesto` de `monto_total_usd` USD ya está disponible.
+3. Inserta un `Aviso` en `avisos` para el `Paciente` (`usuario_id = estudio.paciente.usuario_id`, `canal = CanalAviso.APP`) informando que el `Presupuesto` de `monto_total_usd` USD ya está disponible, y ejecuta `session.flush()`.
+4. Envía el correo al `Paciente` con `EmailClient.enviar_aviso(asunto, mensaje, destinatarios=[paciente.usuario.email], referencia="presupuesto-<id>")`. El envío del mail es **obligatorio**: si falla, no se emite el presupuesto.
+5. Ejecuta `session.commit()`.
 4. Ejecuta `session.commit()`.
 **Timeout**: `4s`
 **Input**: `estudio`, `emitido_por_id`, `cantidad_genes`, `monto_total_usd`, `solicitud_externa_id`
@@ -133,6 +149,7 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 **Output on FAILURE**:
   - `FAILURE(conflict)`: `IntegrityError` en `presupuestos.estudio_id` -> `session.rollback()` -> `return 409 Conflict` (`code: "PRESUPUESTO_YA_EMITIDO"`).
   - `FAILURE(db_error)` / `FAILURE(timeout)`: Error de base de datos -> `GO TO ABORT_CLEANUP`.
+  - `FAILURE(email_error)`: `EmailClient` lanza `ClienteServicioError` (API de mail caída o timeout) -> `GO TO ABORT_CLEANUP` -> `return 502 Bad Gateway` (`code: "ERROR_ENVIO_EMAIL"`, `retryable: true`).
 
 **Observable states during this step**:
   - **Customer/Actor (`Administrativo`) sees**: Confirmación `"Presupuesto #<id> emitido por USD <monto>"`.
@@ -143,10 +160,10 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 ---
 
 ### ABORT_CLEANUP: Reversión de emisión de presupuesto
-**Triggered by**: Fallo de base de datos en `STEP 3`.
+**Triggered by**: Fallo de base de datos o fallo en el envío del correo (`FAILURE(email_error)`) en `STEP 3`.
 **Actions**:
   1. Ejecutar `session.rollback()` revirtiendo la inserción en `presupuestos`, `autorizaciones`, `avisos` y cualquier cambio en `estudios.estado`.
-  2. Retornar `500 Internal Server Error` / `503 Service Unavailable` con `retryable: true`.
+    2. Retornar `500 Internal Server Error` / `503 Service Unavailable` (fallo de base de datos) o `502 Bad Gateway` (fallo de mail), siempre con `retryable: true`.
 **What customer (`Administrativo`) sees**: Mensaje de error al emitir el presupuesto; el estudio continúa en la bandeja de pendientes para reintentar.
 **What operator sees**: Log de error transaccional; `Estudio` permanece en `EstadoEstudio.CREADO` sin `Presupuesto`.
 
@@ -173,6 +190,35 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 
 ## Handoff Contracts
 
+### 0. Frontend Administrativo -> Backend (bandeja)
+**Endpoint**: `GET /api/v1/presupuestos/pendientes?dni=301`
+**Success response** (`200 OK`):
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "estudio_id": 101,
+      "estado_estudio": "Creado",
+      "es_pompe_urgente": false,
+      "creado_en": "2026-11-20T10:15:00",
+      "paciente_nombre": "Juan Pérez",
+      "paciente_dni": "30111333",
+      "medico_nombre": "Laura Mendez",
+      "patologia_nombre": "Enfermedad de Pompe",
+      "cantidad_genes": 7,
+      "precio_base_usd": "500.00",
+      "genes_adicionales": 2,
+      "costo_adicional_usd": "60.00",
+      "monto_estimado_usd": "560.00",
+      "obra_social": { "id": 5, "nombre": "OSDE", "porcentaje_cobertura": "80.00" }
+    }
+  ]
+}
+```
+*(Si `cantidad_genes == 0`, `monto_estimado_usd` es `null` y el front deshabilita la emisión.)*
+
+---
 ### 1. Frontend Administrativo -> Backend (`router` -> `service`)
 **Endpoint**: `POST /api/v1/estudios/{estudio_id}/presupuesto`
 **Payload**:
@@ -214,37 +260,34 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 
 ---
 
-### 2. Backend (`obras_sociales_client`) -> `API de obras sociales`
-**Endpoint**: `GET /api/v1/obras-sociales` / `POST /api/v1/solicitudes-autorizacion`
-**Payload** (cuando se notifica solicitud de autorización a la API de obras sociales):
+### 2. Backend (`ObraSocialClient`) -> `API de obras sociales`
+**Endpoints**: `GET /obras-sociales?buscar=<nombre>` / `POST /solicitudes`
+**Payload** (`POST /solicitudes`):
 ```json
 {
-  "rnos": "115404",
+  "obra_social_id": "os-1",
   "paciente_nombre": "Juan Pérez",
-  "paciente_dni": "40123456",
   "fecha": "2026-10-28",
-  "monto_total_usd": "560.00"
+  "referencia_externa": "101"
 }
 ```
-**Success response** (`200 OK` / `201 Created`):
+**Success response** (`201 Created`):
 ```json
 {
-  "ok": true,
-  "solicitud_externa_id": "OS-2026-00981",
-  "porcentaje_cobertura": "80.00"
-}
-```
-**Failure response**:
-```json
-{
-  "ok": false,
-  "error": "Servicio externo de obras sociales no disponible",
-  "code": "OBRAS_SOCIALES_API_DOWN",
-  "retryable": true
+  "id": "sol-981",
+  "estado": "pendiente",
+  "urls_simulacion": { "autorizar": "...", "rechazar": "..." }
 }
 ```
 **Timeout**: `5s`
-**ON FAILURE**: Usar los datos de la tabla local `obras_sociales` (`Copia local de la API de obras sociales`) y continuar con `solicitud_externa_id = null`.
+**ON FAILURE** (`ClienteServicioError`): usar los datos de la tabla local `obras_sociales` y continuar con `solicitud_externa_id = null` (gestión manual del `Administrativo`).
+
+---
+
+### 3. Backend (`EmailClient`) -> API de mail
+**Método**: `EmailClient.enviar_aviso(asunto, mensaje, destinatarios, referencia)`
+**Payload**: asunto `"Presupuesto disponible"`, mensaje con `monto_total_usd`, destinatario = email del `Paciente`.
+**ON FAILURE** (`ClienteServicioError`): `ABORT_CLEANUP` -> `502` (`code: "ERROR_ENVIO_EMAIL"`, `retryable: true`).
 
 ---
 
@@ -279,6 +322,12 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 | **TC-04: Estudio con obra social pasa a Pendiente de autorización** | `POST /api/v1/estudios/{id}/presupuesto` en un estudio con `obra_social_id != None` y 6 genes. | Retorna `201 Created`; `Presupuesto.monto_total_usd == Decimal("530.00")`; `Estudio.estado == EstadoEstudio.PENDIENTE_AUTORIZACION`; se crea fila en `autorizaciones` con `resultado = ResultadoAutorizacion.PENDIENTE`. |
 | **TC-05: Intento de emitir presupuesto duplicado para el mismo estudio** | Segunda llamada a `POST /api/v1/estudios/{id}/presupuesto` sobre un estudio que ya tiene presupuesto. | Retorna `409 Conflict` (`code: "PRESUPUESTO_YA_EMITIDO"`); no altera el presupuesto existente. |
 | **TC-06: Usuario sin rol Administrativo** | `POST /api/v1/estudios/{id}/presupuesto` invocado por un `Médico` o `Paciente`. | Retorna `403 Forbidden` (`code: "FORBIDDEN_ROLE"`). |
+| **TC-07: API de obras sociales caída** | `POST` en un estudio con obra social mientras `ObraSocialClient` lanza `ClienteServicioError`. | Retorna `201 Created`; usa `porcentaje_cobertura` local; `Autorizacion.solicitud_externa_id is None`. |
+| **TC-08: Fallo en el envío del mail** | `POST` mientras `EmailClient.enviar_aviso` lanza `ClienteServicioError`. | Retorna `502` (`code: "ERROR_ENVIO_EMAIL"`, `retryable: true`); no se persiste `Presupuesto`, `Autorizacion`, `Aviso` ni cambio de estado. |
+| **TC-09: Fallo de base de datos** | `POST` con error en `session.commit()`. | Retorna `500`/`503` con `retryable: true`; rollback completo. |
+| **TC-10: Bandeja de pendientes** | `GET /api/v1/presupuestos/pendientes` por un `Administrativo`. | `200`; incluye solo `Estudios` en `Creado` sin `Presupuesto`, con `cantidad_genes` y `monto_estimado_usd` correctos. |
+| **TC-11: Estudio presupuestado sale de la bandeja** | Emitir el presupuesto de un `Estudio` y volver a listar. | El `Estudio` ya no aparece. |
+| **TC-12: Filtro por DNI y permisos de la bandeja** | `GET` con `dni` válido, inexistente, no numérico y con rol `Médico`. | Filtra correctamente; `[]` si no hay coincidencias; `422 DNI_INVALIDO`; `403 FORBIDDEN_ROLE`. |
 
 ---
 
@@ -299,3 +348,5 @@ El `Administrativo` selecciona un `Estudio` en estado `Creado` sin presupuesto e
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/economia.py` y `reglas.py`. | Marcada como `Approved`. |
 | 2026-11-17 | Actualizada por nuevos requerimientos: habilitación de pago en cuotas con `MercadoPago` (Esc. 06/38) y auditoría en `registro_modificaciones` al transicionar estado del `Estudio`. | Actualizada a v1.1. |
+| 2026-11-23 | Clientes y endpoints alineados con `ObraSocialClient` y `EmailClient` reales; envío de mail obligatorio (aborta con 502 si falla, igual que el Escenario 10). | Actualizada a v1.2. |
+| 2026-11-23 | El episodio 1 ("el Administrativo consulta el Estudio pendiente de presupuestar") y la "bandeja de trámites" del Trigger no tenían endpoint; sin él el front no puede obtener el `estudio_id`. | Se agrega STEP 0 `GET /api/v1/presupuestos/pendientes`, Handoff 0 y TC-10..12. Versión 1.3. |

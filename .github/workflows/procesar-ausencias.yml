@@ -1,0 +1,36 @@
+name: Procesar ausencias diarias
+
+on:
+  schedule:
+    # 21:15 UTC = 18:15 hora Argentina (tras HORA_CIERRE_JORNADA = 18:00)
+    - cron: "15 21 * * *"
+  workflow_dispatch:
+
+jobs:
+  procesar-ausencias:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar Poetry y dependencias
+        run: |
+          pip install --no-cache-dir "poetry>=2.0,<3.0"
+          poetry install --only main --no-interaction --no-ansi
+
+      - name: Ejecutar procesamiento de turnos vencidos
+        env:
+          TZ: America/Argentina/Buenos_Aires
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          EMAIL_API_KEY: ${{ secrets.EMAIL_API_KEY }}
+          EMAIL_API_URL: ${{ secrets.EMAIL_API_URL }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY }}
+        run: poetry run flask --app main procesar-ausencias
