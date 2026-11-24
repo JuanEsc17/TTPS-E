@@ -50,8 +50,7 @@
 
 - **Sesión y Rol:** El usuario autenticado debe poseer una sesión activa válida, tener `Usuario.rol == Rol.GERENTE_MEDICO` y `Usuario.debe_cambiar_password == False`.
 - **Datos existentes en `app/src/core/models/`:**
-  - Debe existir una fila en `usuarios` correspondiente al **gerente médico** y su fila vinculada en `medicos` (`medicos.usuario_id == usuarios.id`), cuyo `medicos.id` se utilizará como `cupones.gerente_id`.
-  - Si en la solicitud se incluye `medico_id` para asignar el cupón a un **médico** en el mismo acto, debe existir dicha fila en la tabla `medicos`.
+  - Debe existir una fila en `usuarios` correspondiente al **gerente médico** y su fila vinculada en `medicos` (`medicos.usuario_id == usuarios.id`), cuyo `medicos.id` se utilizará como `cupones.gerente_id`.borro re
 - **Estado previo del `Estudio`:** No aplica (`N/A`); el **cupón** se crea antes de ser aplicado al pago del **presupuesto** de un **estudio**.
 - **Servicios externos:** La **API de cupones** debe estar accesible mediante `CUPONES_API_URL` y la clave del grupo `CUPONES_API_KEY`.
 ---
