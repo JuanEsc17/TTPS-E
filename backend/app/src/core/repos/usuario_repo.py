@@ -1,6 +1,9 @@
 """Repositorio de acceso a datos de usuario y seguridad de acceso"""
-from datetime import UTC, datetime
+import logging
 
+
+from datetime import UTC, datetime
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy import select, update
 from src.core.database import db
 from src.core.models import (
@@ -10,8 +13,9 @@ from src.core.models import (
     Rol,
     Usuario,
 )
+from src.core.services.excepciones import ErrorBaseDatos, ErrorConflicto
 
-
+logger = logging.getLogger(__name__)
 def ahora_utc():
     return datetime.now(UTC).replace(tzinfo=None)
 
@@ -111,3 +115,46 @@ def buscar_ultimo_codigo(
     if for_update:
         stmt = stmt.with_for_update()
     return db.session.scalar(stmt)
+
+def crear_administrativo(
+    *,
+    nombre: str,
+    apellido: str,
+    telefono: str,
+    email: str,
+    password_hash: str,
+) -> Usuario:
+    """Crea Usuario (Rol.ADMINISTRATIVO)"""
+    try:
+        usuario = Usuario(
+            email=email,
+            password_hash=password_hash,
+            rol=Rol.ADMINISTRATIVO,
+            nombre=nombre,
+            apellido=apellido,
+            telefono=telefono,
+            debe_cambiar_password=False,
+        )
+        db.session.add(usuario)
+        db.session.commit()
+
+        logger.info(
+            "step=3_alta_administrativo_ok usuario_id=%s email=%s",
+            usuario.id,
+            email
+        )
+        return usuario
+    except IntegrityError as exc:
+        # Cualquier conflicto UNIQUE concurrente revierte todo (no quedan usuarios huerfanos)
+        db.session.rollback()
+        logger.warning("abort_cleanup alta_administrativo conflicto: %s", exc)
+        raise ErrorConflicto(
+            "Ese correo electrónico ya se encuentra registrado.",
+            codigo="EMAIL_YA_REGISTRADO",
+        ) from exc
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        logger.error("abort_cleanup alta_administrativo db_error: %s", exc)
+        raise ErrorBaseDatos(
+            "Error temporal al registrar el administrativo. Intente nuevamente.",
+        ) from exc

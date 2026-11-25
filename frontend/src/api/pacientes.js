@@ -19,6 +19,7 @@ async function parseResponse(resp, fallbackMsg) {
         }
         const err = new Error(mensaje);
         err.code = data.code;
+        err.status = resp.status;
         err.retryable = Boolean(data.retryable);
         throw err;
     }
@@ -71,4 +72,95 @@ export async function altaPacienteRequest(token, payload) {
         body: JSON.stringify(payload),
     });
     return parseResponse(resp, "No se pudo dar de alta al paciente.");
+}
+
+export async function obtenerFamiliaresRequest(token, pacienteId) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/familiares`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    return parseResponse(resp, "No se pudo cargar la información familiar.");
+}
+
+export async function actualizarFamiliaresRequest(token, pacienteId, familiares) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/familiares`, {
+        method: "PUT",
+        headers: authHeaders(token),
+        body: JSON.stringify({ familiares }),
+    });
+    return parseResponse(resp, "No se pudo actualizar la información familiar.");
+}
+
+export async function obtenerFamiliogramaSvgRequest(token, pacienteId) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/familiograma`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        throw new Error(data.error || "No se pudo cargar el familiograma.");
+    }
+    return resp.text();
+}
+
+export async function transcribirHistoriaClinicaRequest(token, audioBlob, pacienteId = null) {
+    const form = new FormData();
+    form.append("audio", audioBlob, "historia_clinica.webm");
+    if (pacienteId) {
+        form.append("paciente_id", String(pacienteId));
+    }
+    const resp = await fetch("/api/v1/pacientes/historia-clinica/transcribir", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+    });
+    return parseResponse(resp, "No se pudo transcribir la grabación.");
+}
+
+export async function actualizarHistoriaClinicaRequest(token, pacienteId, historiaClinica) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/historia-clinica`, {
+        method: "PATCH",
+        headers: authHeaders(token),
+        body: JSON.stringify({ historia_clinica: historiaClinica }),
+    });
+    return parseResponse(resp, "No se pudo actualizar la historia clínica.");
+}
+
+export async function listarMedicosAutorizadosRequest(token, { signal } = {}) {
+    const resp = await fetch("/api/v1/pacientes/mi-perfil/medicos-autorizados", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+    });
+    return parseResponse(resp, "No se pudieron cargar los médicos autorizados.");
+}
+
+export async function autorizarMedicosRequest(token, { medicosIds, motivo = "" }) {
+    const body = { medicos_ids: medicosIds };
+    if (motivo && motivo.trim()) {
+        body.motivo = motivo.trim();
+    }
+    const resp = await fetch("/api/v1/pacientes/mi-perfil/medicos-autorizados", {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify(body),
+    });
+    return parseResponse(resp, "No se pudo otorgar la autorización a los médicos seleccionados.");
+}
+
+export async function revocarAutorizacionMedicoRequest(token, medicoId, { motivo = "" } = {}) {
+    const opciones = {
+        method: "DELETE",
+        headers: authHeaders(token),
+    };
+    if (motivo && motivo.trim()) {
+        opciones.body = JSON.stringify({ motivo: motivo.trim() });
+    }
+    const resp = await fetch(`/api/v1/pacientes/mi-perfil/medicos-autorizados/${medicoId}`, opciones);
+    return parseResponse(resp, "No se pudo revocar la autorización del médico.");
+}
+
+export async function obtenerHistoriaClinicaRequest(token, pacienteId, { signal } = {}) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/historia-clinica`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+    });
+    return parseResponse(resp, "No se pudo consultar la historia clínica del paciente.");
 }

@@ -8,6 +8,7 @@ const MENU_POR_ROL = {
     paciente: [
         { to: "/paciente/estudios", label: "Mis estudios" },
         { to: "/paciente/mis-turnos", label: "Mis turnos" },
+        { to: "/paciente/medicos-autorizados", label: "Médicos autorizados" },
         { to: "/chatbot", label: "Asistente de patologías" },
     ],
     medico: [
@@ -18,8 +19,10 @@ const MENU_POR_ROL = {
     gerente_medico: [
         { to: "/gerencia/patologias", label: "Patologías" },
         { to: "/medico/estudios", label: "Estudios" },
+        { to: "/medico/pacientes", label: "Pacientes" },
     ],
     administrativo: [
+        { to: "/administracion/presupuestos", label: "Presupuestos" },
         { to: "/administracion/muestras", label: "Registro de muestras" },
         { to: "/administracion/remuestreos", label: "Remuestreos" },
         { to: "/administracion/estudios", label: "Carga de datos ACTG" }],
@@ -28,6 +31,7 @@ const MENU_POR_ROL = {
     admin_general: [
         { to: "/admin/dashboard", label: "Panel general" },
         { to: "/admin/gerentes-medicos/nuevo", label: "Alta gerente médico" },
+        { to: "/admin/administrativos/nuevo", label: "Alta administrativo" }
     ],
 };
 
@@ -73,9 +77,11 @@ export default function Layout({ sesion, onCerrarSesion }) {
             ? "Cambiar contraseña"
             : pathname.endsWith("/resultado")
                 ? "Resultado del estudio"
-                : pathname.endsWith("/turno")
-                    ? "Turno de extracción"
-                    : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
+                : pathname.endsWith("/historia-clinica")
+                    ? "Historia clínica"
+                    : pathname.endsWith("/turno")
+                        ? "Turno de extracción"
+                        : itemsMenu.find((i) => pathname.startsWith(i.to))?.label || "Inicio";
 
     const contenidoSidebar = (
         <div className="relative flex h-full flex-col justify-between overflow-hidden bg-gradient-to-b from-[#062846] via-[#093D6B] to-[#0B4F8A] p-4 text-white">

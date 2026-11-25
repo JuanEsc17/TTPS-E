@@ -101,14 +101,23 @@ def validar_sintomas_contra_patologia(
             http_status=422,
         )
 
-    # Mapea sintoma_id -> es_cardinal para la patologia sospechada
+    # Mapea sintoma_id -> es_cardinal y por descripcion en minuscula (cubre conceptos SNOMED equivalentes)
     mapa_patologia = {ps.sintoma_id: ps.es_cardinal for ps in patologia.sintomas}
+    mapa_por_nombre = {
+        ps.sintoma.descripcion.strip().lower(): ps.es_cardinal
+        for ps in patologia.sintomas
+        if ps.sintoma and ps.sintoma.descripcion
+    }
 
     cardinales = 0
     secundarios = 0
     for sintoma in sintomas_entidades:
-        if sintoma.id in mapa_patologia:
-            if mapa_patologia[sintoma.id]:
+        es_cardinal = mapa_patologia.get(sintoma.id)
+        if es_cardinal is None:
+            es_cardinal = mapa_por_nombre.get((sintoma.descripcion or "").strip().lower())
+
+        if es_cardinal is not None:
+            if es_cardinal:
                 cardinales += 1
             else:
                 secundarios += 1

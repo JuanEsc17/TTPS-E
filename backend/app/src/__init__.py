@@ -15,11 +15,13 @@ from .web.api.admin_usuarios import admin_usuarios_bp
 from .web.api.auth import auth_bp
 from .web.api.bioinformatica import bioinformatica_bp
 from .web.api.chatbot import chatbot_bp
+from .web.api.estudios import estudios_bp
 from .web.api.logistica import logistica_bp
 from .web.api.medicos import medicos_bp
 from .web.api.muestras import muestras_bp
 from .web.api.pacientes import pacientes_bp
 from .web.api.patologias import patologias_bp
+from .web.api.presupuestos import presupuestos_bp
 from .web.api.resultados import resultados_bp
 from .web.api.salud import salud_bp
 from .web.api.sample_sets import sample_sets_bp
@@ -91,9 +93,11 @@ def create_app(config: dict | None = None) -> Flask:
     app.register_blueprint(patologias_bp)
     app.register_blueprint(chatbot_bp)
     app.register_blueprint(bioinformatica_bp)
+    app.register_blueprint(estudios_bp)
     app.register_blueprint(resultados_bp)
     app.register_blueprint(sample_sets_bp)
     app.register_blueprint(salud_bp)
+    app.register_blueprint(presupuestos_bp)
 
     @app.cli.command("init-db")
     def init_db_cli() -> None:

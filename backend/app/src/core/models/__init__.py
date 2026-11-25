@@ -51,7 +51,14 @@ from .logistica import (
     PosicionTransporte,
     SampleSet,
 )
-from .perfiles import Especialidad, Medico, MedicoEspecialidad, Paciente, Transportista
+from .perfiles import (
+    Especialidad,
+    Medico,
+    MedicoEspecialidad,
+    Paciente,
+    PacienteMedicoAutorizado,
+    Transportista,
+)
 from .reglas import (
     GENES_INCLUIDOS,
     MAX_AUSENCIAS,
@@ -104,6 +111,7 @@ __all__ = [
     "OrdenDelDiaParada",
     "OrigenGen",
     "Paciente",
+    "PacienteMedicoAutorizado",
     "PacienteSintoma",
     "Pago",
     "Patologia",

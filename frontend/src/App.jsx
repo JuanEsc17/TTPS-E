@@ -8,6 +8,9 @@ import VerificarDispositivoPage from "./pages/VerificarDispositivoPage";
 import RegistroMedicoPage from "./pages/RegistroMedicoPage";
 import PacientesMedicoPage from "./pages/PacientesMedicoPage";
 import AltaPacientePage from "./pages/AltaPacientePage";
+import FamiliaresPacientePage from "./pages/FamiliaresPacientePage";
+import EstudiosMedicoPage from "./pages/EstudiosMedicoPage";
+import AltaEstudioPage from "./pages/AltaEstudioPage";
 import CambiarPasswordPage from "./pages/CambiarPasswordPage";
 import ChatbotPage from "./pages/ChatbotPage";
 import OrdenDelDiaPage from "./pages/OrdenDelDiaPage";
@@ -18,9 +21,13 @@ import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
 import RegistroMuestraAdminPage from "./pages/RegistroMuestraAdminPage";
 import RemuestreoAdminPage from "./pages/RemuestreoAdminPage";
+import PresupuestosAdminPage from "./pages/PresupuestosAdminPage";
 import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
 import AltaGerenteMedicoPage from "./pages/AltaGerenteMedicoPage";
+import AltaAdministrativoPage from "./pages/AltaAdministrativoPage";
+import MedicosAutorizadosPacientePage from "./pages/MedicosAutorizadosPacientePage";
+import HistoriaClinicaPacientePage from "./pages/HistoriaClinicaPacientePage";
 
 const RUTAS_INICIO = [
   { path: "/admin/dashboard", titulo: "Administración general" },
@@ -70,10 +77,14 @@ export default function App() {
 
         <Route element={<Layout sesion={sesion} onCerrarSesion={manejarCerrarSesion} />}>
           <Route path="/paciente/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
-          <Route path="/medico/estudios" element={<EstudiosResultadosPage sesion={sesion} />} />
+          <Route path="/paciente/medicos-autorizados" element={<MedicosAutorizadosPacientePage sesion={sesion} />} />
+          <Route path="/medico/estudios" element={<EstudiosMedicoPage sesion={sesion} />} />
+          <Route path="/medico/estudios/nuevo" element={<AltaEstudioPage sesion={sesion} />} />
           <Route path="/estudios/:estudioId/resultado" element={<ResultadoEstudioPage sesion={sesion} />} />
           <Route path="/medico/pacientes" element={<PacientesMedicoPage sesion={sesion} />} />
           <Route path="/medico/pacientes/nuevo" element={<AltaPacientePage sesion={sesion} />} />
+          <Route path="/medico/pacientes/:pacienteId/historia-clinica" element={<HistoriaClinicaPacientePage sesion={sesion} />} />
+          <Route path="/medico/pacientes/:pacienteId/familiares" element={<FamiliaresPacientePage sesion={sesion} />} />
           {RUTAS_INICIO.map((r) => (
             <Route key={r.path} path={r.path} element={<PanelPlaceholder titulo={r.titulo} />} />
           ))}
@@ -124,6 +135,14 @@ export default function App() {
           <Route
             path="/admin/gerentes-medicos/nuevo"
             element={<AltaGerenteMedicoPage sesion={sesion} />}
+          />
+          <Route
+            path="/admin/administrativos/nuevo"
+            element={<AltaAdministrativoPage sesion={sesion} />}
+          />
+          <Route
+            path="/administracion/presupuestos"
+            element={<PresupuestosAdminPage sesion={sesion} />}
           />
         </Route>
 
