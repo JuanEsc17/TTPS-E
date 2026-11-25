@@ -8,14 +8,17 @@ from src.core.database import db
 from src.core.models import (
     Aviso,
     CanalAviso,
+    EntidadAuditable,
     Familiar,
     FamiliarSintoma,
     Medico,
     Paciente,
     PacienteSintoma,
     Rol,
+    TipoAccionAuditoria,
     Usuario,
 )
+from src.core.services import auditoria_service
 from src.core.services.excepciones import ErrorDominio
 
 
@@ -181,6 +184,34 @@ def reemplazar_familiares(
         db.session.rollback()
         raise ErrorDominio(
             "Error temporal al actualizar la informacion familiar. Intente nuevamente.",
+            codigo="ERROR_BASE_DATOS",
+            http_status=503,
+            reintentable=True,
+        ) from exc
+
+def actualizar_historia_clinica(
+    paciente: Paciente,
+    nueva_historia: str,
+    *,
+    usuario_id: int,
+) -> Paciente:
+    """Actualiza historia_clinica del paciente y registra auditoria en la misma transaccion."""
+    try:
+        anterior = paciente.historia_clinica
+        paciente.historia_clinica = nueva_historia
+        auditoria_service.registrar_modificacion(
+            entidad_tipo=EntidadAuditable.PACIENTE,
+            entidad_id=paciente.id,
+            accion=TipoAccionAuditoria.MODIFICACION,
+            cambios={"historia_clinica": {"anterior": anterior, "nuevo": nueva_historia}},
+            usuario_id=usuario_id,
+        )
+        db.session.commit()
+        return paciente
+    except SQLAlchemyError as exc:
+        db.session.rollback()
+        raise ErrorDominio(
+            "Error temporal al guardar la historia clinica. Intente nuevamente.",
             codigo="ERROR_BASE_DATOS",
             http_status=503,
             reintentable=True,

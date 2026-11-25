@@ -6,6 +6,7 @@ from pathlib import Path
 from src.clients.email_client import EmailClient
 from src.clients.exceptions import ClienteError
 from src.clients.familiograma_client import PARENTESCOS_POR_NOMBRE, FamiliogramaClient
+from src.clients.transcriptor_client import TranscriptorClient
 from src.core.repos import clinica_repo, paciente_repo, usuario_repo
 from src.core.services import clinica_service
 from src.core.services.excepciones import ErrorDominio
@@ -452,3 +453,160 @@ def obtener_archivo_familiograma(*, usuario_actual_id: int, paciente_id: int) ->
             http_status=404,
         )
     return ruta
+
+_MAX_AUDIO_BYTES = 15 * 1024 * 1024
+_AUDIO_MIMES_PERMITIDOS = {
+    "audio/webm",
+    "audio/wav",
+    "audio/x-wav",
+    "audio/mpeg",
+    "audio/mp3",
+    "audio/mp4",
+    "audio/ogg",
+}
+
+
+def transcribir_historia_clinica(
+    *,
+    usuario_actual_id: int,
+    audio_bytes: bytes,
+    content_type: str,
+    filename: str = "historia_clinica.webm",
+    paciente_id: int | None = None,
+    transcriptor_client: TranscriptorClient | None = None,
+) -> dict:
+    """Valida un archivo de audio, lo transcribe a texto y opcionalmente lo guarda (E35)."""
+    medico = paciente_repo.buscar_medico_por_usuario_id(usuario_actual_id)
+    if medico is None:
+        raise ErrorDominio(
+            "Solo un medico tratante o gerente medico puede grabar historias clinicas.",
+            codigo="ROL_NO_AUTORIZADO",
+            http_status=403,
+        )
+
+    if not audio_bytes:
+        raise ErrorDominio(
+            "El archivo de audio esta vacio.",
+            codigo="AUDIO_VACIO",
+            http_status=422,
+        )
+
+    if len(audio_bytes) > _MAX_AUDIO_BYTES:
+        raise ErrorDominio(
+            "La grabacion supera el limite maximo de 15 MB.",
+            codigo="AUDIO_EXCEDE_LIMITE",
+            http_status=413,
+        )
+
+    mime_base = (content_type or "").split(";", 1)[0].strip().lower()
+    if mime_base not in _AUDIO_MIMES_PERMITIDOS:
+        raise ErrorDominio(
+            "Formato de audio no soportado. Use webm, wav, mp3, mp4 u ogg.",
+            codigo="FORMATO_AUDIO_NO_SOPORTADO",
+            http_status=415,
+        )
+
+    paciente = None
+    if paciente_id is not None:
+        paciente = paciente_repo.buscar_paciente_por_id(paciente_id)
+        if paciente is None:
+            raise ErrorDominio(
+                "El paciente indicado no existe.",
+                codigo="PACIENTE_NO_ENCONTRADO",
+                http_status=404,
+            )
+        if paciente.medico_id != medico.id:
+            raise ErrorDominio(
+                "No tiene permiso para modificar la historia clinica de este paciente.",
+                codigo="PACIENTE_AJENO",
+                http_status=403,
+            )
+
+    cliente = transcriptor_client or TranscriptorClient()
+    try:
+        texto = cliente.transcribir(
+            audio_bytes=audio_bytes,
+            content_type=mime_base,
+            filename=filename,
+        )
+    except ClienteError as exc:
+        raise ErrorDominio(
+            f"El transcriptor de audio no se encuentra disponible: {exc}",
+            codigo="TRANSCRIPTOR_NO_DISPONIBLE",
+            http_status=502,
+            reintentable=True,
+        ) from exc
+
+    texto_limpio = " ".join(texto.split())
+    if not texto_limpio:
+        raise ErrorDominio(
+            "No se detecto voz clara en la grabacion enviada. Intente grabar nuevamente.",
+            codigo="AUDIO_SIN_VOZ_DETECTADA",
+            http_status=422,
+            reintentable=True,
+        )
+
+    guardado = False
+    if paciente is not None:
+        paciente_repo.actualizar_historia_clinica(
+            paciente,
+            texto_limpio,
+            usuario_id=usuario_actual_id,
+        )
+        guardado = True
+
+    return {
+        "paciente_id": paciente.id if paciente else None,
+        "historia_clinica": texto_limpio,
+        "guardado_en_bd": guardado,
+    }
+
+
+def actualizar_historia_clinica_paciente(
+    *,
+    usuario_actual_id: int,
+    paciente_id: int,
+    historia_clinica: str,
+) -> dict:
+    """Guarda o actualiza la historia clinica de un paciente existente (E35)."""
+    medico = paciente_repo.buscar_medico_por_usuario_id(usuario_actual_id)
+    if medico is None:
+        raise ErrorDominio(
+            "Solo un medico tratante o gerente medico puede actualizar la historia clinica.",
+            codigo="ROL_NO_AUTORIZADO",
+            http_status=403,
+        )
+
+    paciente = paciente_repo.buscar_paciente_por_id(paciente_id)
+    if paciente is None:
+        raise ErrorDominio(
+            "El paciente indicado no existe.",
+            codigo="PACIENTE_NO_ENCONTRADO",
+            http_status=404,
+        )
+    if paciente.medico_id != medico.id:
+        raise ErrorDominio(
+            "No tiene permiso para modificar la historia clinica de este paciente.",
+            codigo="PACIENTE_AJENO",
+            http_status=403,
+        )
+
+    texto_limpio = (historia_clinica or "").strip()
+    if not texto_limpio:
+        raise ErrorDominio(
+            "La historia clinica no puede estar vacia.",
+            codigo="HISTORIA_CLINICA_OBLIGATORIA",
+            http_status=422,
+        )
+
+    paciente_repo.actualizar_historia_clinica(
+        paciente,
+        texto_limpio,
+        usuario_id=usuario_actual_id,
+    )
+
+    return {
+        "paciente_id": paciente.id,
+        "historia_clinica": paciente.historia_clinica,
+        "guardado_en_bd": True,
+    }

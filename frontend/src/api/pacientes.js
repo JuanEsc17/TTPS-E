@@ -99,3 +99,26 @@ export async function obtenerFamiliogramaSvgRequest(token, pacienteId) {
     }
     return resp.text();
 }
+
+export async function transcribirHistoriaClinicaRequest(token, audioBlob, pacienteId = null) {
+    const form = new FormData();
+    form.append("audio", audioBlob, "historia_clinica.webm");
+    if (pacienteId) {
+        form.append("paciente_id", String(pacienteId));
+    }
+    const resp = await fetch("/api/v1/pacientes/historia-clinica/transcribir", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: form,
+    });
+    return parseResponse(resp, "No se pudo transcribir la grabación.");
+}
+
+export async function actualizarHistoriaClinicaRequest(token, pacienteId, historiaClinica) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/historia-clinica`, {
+        method: "PATCH",
+        headers: authHeaders(token),
+        body: JSON.stringify({ historia_clinica: historiaClinica }),
+    });
+    return parseResponse(resp, "No se pudo actualizar la historia clínica.");
+}

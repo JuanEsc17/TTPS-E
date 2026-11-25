@@ -60,3 +60,35 @@ def ver_familiograma(paciente_id: int):
         paciente_id=paciente_id,
     )
     return send_file(ruta, mimetype="image/svg+xml")
+
+@pacientes_bp.post("/historia-clinica/transcribir")
+@requiere_sesion(roles=(Rol.MEDICO, Rol.GERENTE_MEDICO))
+def transcribir_historia_clinica():
+    archivo = request.files.get("audio")
+    audio_bytes = archivo.read() if archivo else b""
+    content_type = archivo.mimetype if archivo else ""
+    filename = (archivo.filename or "historia_clinica.webm") if archivo else "historia_clinica.webm"
+
+    paciente_id_raw = request.form.get("paciente_id")
+    paciente_id = int(paciente_id_raw) if paciente_id_raw and paciente_id_raw.isdigit() else None
+
+    resultado = paciente_service.transcribir_historia_clinica(
+        usuario_actual_id=g.usuario_actual.id,
+        audio_bytes=audio_bytes,
+        content_type=content_type,
+        filename=filename,
+        paciente_id=paciente_id,
+    )
+    return jsonify({"ok": True, "data": resultado}), 200
+
+
+@pacientes_bp.patch("/<int:paciente_id>/historia-clinica")
+@requiere_sesion(roles=(Rol.MEDICO, Rol.GERENTE_MEDICO))
+def actualizar_historia_clinica(paciente_id: int):
+    payload = request.get_json(silent=True) or {}
+    resultado = paciente_service.actualizar_historia_clinica_paciente(
+        usuario_actual_id=g.usuario_actual.id,
+        paciente_id=paciente_id,
+        historia_clinica=str(payload.get("historia_clinica") or ""),
+    )
+    return jsonify({"ok": True, "data": resultado}), 200

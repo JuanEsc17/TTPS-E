@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
     altaPacienteRequest,
@@ -79,6 +79,9 @@ export default function AltaPacientePage({ sesion }) {
     const [nuevoFamDiag, setNuevoFamDiag] = useState("");
 
     const [enviando, setEnviando] = useState(false);
+    const [grabandoVoz, setGrabandoVoz] = useState(false);
+    const [avisoVoz, setAvisoVoz] = useState("");
+    const reconocimientoRef = useRef(null);
     const [error, setError] = useState("");
     const [erroresCampos, setErroresCampos] = useState({});
     const [pacienteCreado, setPacienteCreado] = useState(null);
@@ -99,6 +102,56 @@ export default function AltaPacientePage({ sesion }) {
             .catch((err) => setError(err.message))
             .finally(() => setCargandoPatologias(false));
     }, [token]);
+
+    function toggleDictadoVoz() {
+        setAvisoVoz("");
+        if (grabandoVoz && reconocimientoRef.current) {
+            reconocimientoRef.current.stop();
+            setGrabandoVoz(false);
+            return;
+        }
+
+        const SpeechRecognition =
+            window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+            setAvisoVoz(
+                "Tu navegador no soporta dictado por voz directo (usá Chrome o Edge, o escribí el resumen)."
+            );
+            return;
+        }
+
+        const rec = new SpeechRecognition();
+        rec.lang = "es-AR";
+        rec.continuous = true;
+        rec.interimResults = false;
+
+        rec.onresult = (event) => {
+            let textoNuevo = "";
+            for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                if (event.results[i].isFinal) {
+                    textoNuevo += `${event.results[i][0].transcript} `;
+                }
+            }
+            if (textoNuevo.trim()) {
+                setHistoriaClinica((prev) =>
+                    prev ? `${prev.trim()} ${textoNuevo.trim()}` : textoNuevo.trim()
+                );
+            }
+        };
+
+        rec.onerror = () => {
+            setAvisoVoz("No se pudo capturar el audio del micrófono.");
+            setGrabandoVoz(false);
+        };
+
+        rec.onend = () => {
+            setGrabandoVoz(false);
+        };
+
+        reconocimientoRef.current = rec;
+        rec.start();
+        setGrabandoVoz(true);
+    }
 
     async function handleBuscarSnomed() {
         const q = busquedaSnomed.trim();
@@ -415,14 +468,35 @@ export default function AltaPacientePage({ sesion }) {
                         </div>
 
                         <div>
-                            <label className="mb-1 block text-xs font-medium text-slate-700">Historia clínica</label>
+                            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                                <label className="block text-xs font-medium text-slate-700">
+                                    Historia clínica
+                                </label>
+                                <button
+                                    type="button"
+                                    onClick={toggleDictadoVoz}
+                                    className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1 text-xs font-semibold transition ${
+                                        grabandoVoz
+                                            ? "border-red-300 bg-red-50 text-red-700"
+                                            : "border-[#0B4F8A]/30 bg-[#EAF2FA] text-[#0B4F8A] hover:bg-[#DCEAF7]"
+                                    }`}
+                                >
+                                    <span
+                                        className={`h-2 w-2 rounded-full ${
+                                            grabandoVoz ? "animate-pulse bg-red-600" : "bg-[#0B4F8A]"
+                                        }`}
+                                    />
+                                    {grabandoVoz ? "Detener dictado" : "Grabar historia clínica (voz)"}
+                                </button>
+                            </div>
                             <textarea
                                 rows={4}
                                 value={historiaClinica}
                                 onChange={(e) => setHistoriaClinica(e.target.value)}
-                                placeholder="Resumen clínico del paciente..."
+                                placeholder="Resumen clínico del paciente (podés escribirlo o dictarlo con el botón de voz)..."
                                 className="campo-clinico"
                             />
+                            {avisoVoz && <p className="mt-1 text-[11px] font-medium text-amber-700">{avisoVoz}</p>}
                             {erroresCampos.historiaClinica && <p className="mt-1 text-[11px] font-medium text-red-600">{erroresCampos.historiaClinica}</p>}
                         </div>
                     </div>
