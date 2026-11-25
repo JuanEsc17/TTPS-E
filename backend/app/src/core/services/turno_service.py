@@ -1,6 +1,7 @@
 """Servicio de logica de negocio para turnos y centros de extraccion."""
 from __future__ import annotations
 
+import calendar
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -9,7 +10,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from src.clients import ClienteError, EmailClient
 from src.core.models.enums import CanalAviso, EstadoEstudio, ResultadoAutorizacion
 from src.core.models.estudios import Estudio
-from src.core.models.reglas import MAX_AUSENCIAS
+from src.core.models.reglas import MAX_AUSENCIAS, MAX_MESES_ANTICIPACION_TURNO
 from src.core.models.turnos import CentroExtraccion
 from src.core.repos.turno_repo import TurnoRepo
 from src.core.services.formato_correo import asunto_correo, formatear_correo
@@ -202,6 +203,16 @@ class TurnoService:
         return not bool(feriados_adicionales and fecha in feriados_adicionales)
 
     @staticmethod
+    def fecha_maxima_turno(fecha_base: date | None = None) -> date:
+        """Calcula la fecha maxima permitida (hasta 4 meses desde hoy)."""
+        base = fecha_base or date.today()
+        total_meses = (base.year * 12 + (base.month - 1)) + MAX_MESES_ANTICIPACION_TURNO
+        anio = total_meses // 12
+        mes = (total_meses % 12) + 1
+        ultimo_dia = calendar.monthrange(anio, mes)[1]
+        return date(anio, mes, min(base.day, ultimo_dia))
+
+    @staticmethod
     def generar_slots_teoricos_del_dia(fecha: date) -> list[datetime]:
         """Genera los 36 slots de 15 minutos entre las 09:00 y las 17:45 para una fecha."""
         slots: list[datetime] = []
@@ -243,6 +254,13 @@ class TurnoService:
         fecha_actual = ahora or datetime.now()
         if fecha_actual.tzinfo is not None:
             fecha_actual = fecha_actual.replace(tzinfo=None)
+
+        if fecha > cls.fecha_maxima_turno(fecha_actual.date()):
+            return {
+                "centro": centro,
+                "fecha": fecha.isoformat(),
+                "slots_libres": [],
+            }, None, 200
 
         # Generamos los 36 slots del dia (de 09:00 a 17:45)
         slots_teoricos = cls.generar_slots_teoricos_del_dia(fecha)
@@ -296,9 +314,20 @@ class TurnoService:
             return None, "No tiene permisos para solicitar turno para este estudio.", 403
 
         # 4. Validar reglas de agenda del horario solicitado (inicio)
-        # 4.1. Debe ser un horario futuro
-        if inicio <= datetime.now():
+        # 4.1. Debe ser un horario futuro y dentro del horizonte de 4 meses
+        ahora_actual = datetime.now()
+        if inicio <= ahora_actual:
             return None, "El horario del turno debe ser posterior a la fecha y hora actual.", 422
+
+        if inicio.date() > cls.fecha_maxima_turno(ahora_actual.date()):
+            return (
+                None,
+                (
+                    f"Los turnos solo pueden reservarse hasta {MAX_MESES_ANTICIPACION_TURNO} "
+                    "meses despues de la fecha actual."
+                ),
+                422,
+            )
 
         # 4.2. Debe ser un dia laborable (lunes a viernes no feriado)
         if not cls.es_dia_laborable(inicio.date(), feriados_adicionales):

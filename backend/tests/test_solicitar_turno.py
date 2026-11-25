@@ -439,8 +439,17 @@ def test_validaciones_horarias_y_formato_retornan_422(
     # Feriado nacional inamovible que cae viernes: 25/12/2026 (Navidad)
     feriado_navidad = datetime(2026, 12, 25, 10, 30)
 
+    # Fecha habil mas alla del limite maximo de 4 meses
+    from src.core.services.turno_service import TurnoService
+
+    dia_excedido = TurnoService.fecha_maxima_turno() + timedelta(days=1)
+    while not TurnoService.es_dia_laborable(dia_excedido):
+        dia_excedido += timedelta(days=1)
+    fuera_de_rango = datetime.combine(dia_excedido, datetime.min.time()).replace(hour=10, minute=0)
+
     casos_invalidos = [
         datetime(2020, 1, 6, 10, 0).isoformat(),      # En el pasado
+        fuera_de_rango.isoformat(),                    # Mas de 4 meses adelante
         sabado.isoformat(),                            # Fin de semana
         feriado_navidad.isoformat(),                   # Feriado nacional
         base.replace(hour=8, minute=45).isoformat(),   # Antes de las 09:00
@@ -457,13 +466,20 @@ def test_validaciones_horarias_y_formato_retornan_422(
         )
         assert res.status_code == 422
 
-    # Disponibilidad en fin de semana o feriado devuelve lista vacia
+    # Disponibilidad en fin de semana, feriado o mas alla de 4 meses devuelve lista vacia
     res_disp_sab = client.get(
         f"/api/v1/centros-extraccion/{centro.id}/turnos-disponibles?fecha={sabado.strftime('%Y-%m-%d')}",
         headers=headers,
     )
     assert res_disp_sab.status_code == 200
     assert res_disp_sab.get_json()["data"]["slots_libres"] == []
+
+    res_disp_fuera = client.get(
+        f"/api/v1/centros-extraccion/{centro.id}/turnos-disponibles?fecha={dia_excedido.isoformat()}",
+        headers=headers,
+    )
+    assert res_disp_fuera.status_code == 200
+    assert res_disp_fuera.get_json()["data"]["slots_libres"] == []
 
 
 # ==============================================================================
