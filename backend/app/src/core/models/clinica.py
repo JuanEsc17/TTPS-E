@@ -76,8 +76,17 @@ class Familiar(Base):
     nombre: Mapped[str] = mapped_column(String(150))
     diagnostico_previo: Mapped[str | None] = mapped_column(String(255))
 
-    paciente: Mapped[Paciente] = relationship(back_populates="familiares")
+    paciente: Mapped[Paciente] = relationship(
+        back_populates="familiares",
+        foreign_keys=[paciente_id],
+    )
     sintomas: Mapped[list[Sintoma]] = relationship(secondary="familiares_sintomas")
+
+    dni: Mapped[str | None] = mapped_column(String(20), index=True)
+    paciente_vinculado_id: Mapped[int | None] = mapped_column(
+        ForeignKey("pacientes.id", ondelete="SET NULL"),
+        index=True,
+    )
 
 
 class FamiliarSintoma(Base):

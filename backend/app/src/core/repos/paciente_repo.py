@@ -159,6 +159,7 @@ def crear_paciente_completo(
                 paciente_id=paciente.id,
                 parentesco=fam["parentesco"],
                 nombre=fam["nombre"],
+                dni=fam.get("dni"),
                 diagnostico_previo=fam.get("diagnostico_previo"),
             )
             db.session.add(familiar)
@@ -401,6 +402,7 @@ def reemplazar_familiares(
                 paciente_id=paciente.id,
                 parentesco=fam["parentesco"],
                 nombre=fam["nombre"],
+                dni=fam.get("dni"),
                 diagnostico_previo=fam.get("diagnostico_previo"),
             )
             db.session.add(familiar)

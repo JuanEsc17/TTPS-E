@@ -43,7 +43,7 @@ from .enums import (
     TipoAnalisis,
     TipoPago,
 )
-from .estudios import Estudio, EstudioGen
+from .estudios import Estudio, EstudioFamiliarVinculado, EstudioGen
 from .logistica import (
     Muestra,
     OrdenDelDia,
@@ -98,6 +98,7 @@ __all__ = [
     "EstadoSampleSet",
     "EstrategiaCDSS",
     "Estudio",
+    "EstudioFamiliarVinculado",
     "EstudioGen",
     "Familiar",
     "FamiliarSintoma",

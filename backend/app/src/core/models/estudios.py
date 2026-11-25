@@ -4,7 +4,16 @@ from __future__ import annotations
 from datetime import date
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, CheckConstraint, Date, Enum, ForeignKey, Integer
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    Enum,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
@@ -63,3 +72,20 @@ class EstudioGen(Base):
 
     estudio: Mapped[Estudio] = relationship(back_populates="genes")
     gen: Mapped[Gen] = relationship()
+
+class EstudioFamiliarVinculado(TimestampMixin, Base):
+    """Vinculo bidireccional entre estudios de pacientes emparentados en el familiograma."""
+    __tablename__ = "estudios_familiares_vinculados"
+    __table_args__ = (
+        UniqueConstraint("estudio_origen_id", "estudio_relacionado_id", name="uq_vinculo_estudios"),
+        CheckConstraint("estudio_origen_id <> estudio_relacionado_id", name="ck_vinculo_no_circular"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    estudio_origen_id: Mapped[int] = mapped_column(ForeignKey("estudios.id", ondelete="CASCADE"), index=True)
+    estudio_relacionado_id: Mapped[int] = mapped_column(ForeignKey("estudios.id", ondelete="CASCADE"), index=True)
+    familiar_id: Mapped[int] = mapped_column(ForeignKey("familiares.id", ondelete="CASCADE"), index=True)
+    parentesco: Mapped[str] = mapped_column(String(80))
+
+    estudio_origen: Mapped[Estudio] = relationship(foreign_keys=[estudio_origen_id])
+    estudio_relacionado: Mapped[Estudio] = relationship(foreign_keys=[estudio_relacionado_id])

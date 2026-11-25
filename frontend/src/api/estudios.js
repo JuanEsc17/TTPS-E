@@ -54,3 +54,18 @@ export async function altaEstudioRequest(token, payload) {
     });
     return parseResponse(resp, "No se pudo dar de alta el estudio.");
 }
+
+export async function listarEstudiosFamiliaresVinculadosRequest(token, estudioId) {
+    const resp = await fetch(`/api/v1/estudios/${estudioId}/familiares-vinculados`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    return parseResponse(resp, "No se pudieron cargar los estudios de familiares vinculados.");
+}
+
+export async function consultarEstudioFamiliarVinculadoRequest(token, estudioId, estudioRelacionadoId) {
+    const resp = await fetch(
+        `/api/v1/estudios/${estudioId}/familiares-vinculados/${estudioRelacionadoId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+    return parseResponse(resp, "No se pudo consultar el detalle del estudio familiar vinculado.");
+}

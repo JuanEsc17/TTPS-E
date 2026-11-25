@@ -227,6 +227,7 @@ def dar_de_alta_paciente(
             {
                 "parentesco": fam["parentesco"],
                 "nombre": fam["nombre"],
+                "dni": (fam.get("dni") or "").strip() or None,
                 "diagnostico_previo": fam.get("diagnostico_previo"),
                 "sintomas_ids": [s.id for s in sintomas_fam],
             }
@@ -272,6 +273,13 @@ def dar_de_alta_paciente(
         mensaje_aviso=mensaje_aviso,
         otorgada_por_usuario_id=usuario_actual_id,
         ip_origen=ip_origen,
+    )
+
+    from src.core.services import estudio_service
+
+    estudio_service.sincronizar_vinculos_familiares_por_paciente(
+        paciente.id,
+        usuario_actor_id=usuario_actual_id,
     )
 
     # Envia credenciales iniciales por mail (si falla la red externa no revierte el alta)
@@ -326,6 +334,7 @@ def _serializar_familiares(familiares: list) -> list[dict]:
         {
             "id": f.id,
             "nombre": f.nombre,
+            "dni": f.dni,
             "parentesco": f.parentesco,
             "diagnostico_previo": f.diagnostico_previo,
             "sintomas": [
@@ -426,6 +435,7 @@ def gestionar_informacion_familiar(
             {
                 "parentesco": parentesco_fam,
                 "nombre": nombre_fam,
+                "dni": (fam.get("dni") or "").strip() or None,
                 "diagnostico_previo": diag_fam,
                 "sintomas_ids": [s.id for s in sintomas_fam],
             }
@@ -444,6 +454,14 @@ def gestionar_informacion_familiar(
         )
 
     paciente_repo.reemplazar_familiares(paciente, familiares_data, familiograma_path)
+
+    from src.core.services import estudio_service
+
+    estudio_service.sincronizar_vinculos_familiares_por_paciente(
+        paciente.id,
+        usuario_actor_id=usuario_actual_id,
+    )
+
     paciente_actualizado = paciente_repo.buscar_paciente_por_id(paciente.id)
 
     return {

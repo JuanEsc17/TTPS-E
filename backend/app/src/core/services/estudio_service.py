@@ -259,6 +259,11 @@ def dar_de_alta_estudio(
         genes_con_origen=genes_con_origen,
     )
 
+    sincronizar_vinculos_familiares_por_paciente(
+        paciente.id,
+        usuario_actor_id=usuario_actual_id,
+    )
+
     return {
         "estudio_id": estudio.id,
         "paciente_id": estudio.paciente_id,
@@ -273,4 +278,140 @@ def dar_de_alta_estudio(
             {"simbolo": gen.simbolo, "origen": origen.value}
             for gen, origen in genes_con_origen
         ],
+    }
+
+def sincronizar_vinculos_familiares_por_paciente(
+    paciente_id: int,
+    *,
+    usuario_actor_id: int | None = None,
+) -> int:
+    """Detecta familiares vinculados por DNI y materializa vinculos bidireccionales entre estudios."""
+    paciente = paciente_repo.buscar_paciente_por_id(paciente_id)
+    if paciente is None:
+        return 0
+
+    coincidencias = estudio_repo.buscar_coincidencias_familiares(paciente)
+    creados = 0
+    for familiar, pac_duenio_id, pac_fam_id in coincidencias:
+        estudios_duenio = estudio_repo.listar_estudios_de_paciente(pac_duenio_id)
+        estudios_fam = estudio_repo.listar_estudios_de_paciente(pac_fam_id)
+        if not estudios_duenio or not estudios_fam:
+            continue
+
+        par_a_b = familiar.parentesco
+        par_b_a = f"Familiar vinculado ({familiar.parentesco})"
+        for e_orig in estudios_duenio:
+            for e_rel in estudios_fam:
+                if estudio_repo.crear_vinculo_bidireccional_si_no_existe(
+                    estudio_a=e_orig,
+                    estudio_b=e_rel,
+                    familiar=familiar,
+                    parentesco_a_b=par_a_b,
+                    parentesco_b_a=par_b_a,
+                    usuario_actor_id=usuario_actor_id,
+                ):
+                    creados += 1
+
+    if creados > 0 or coincidencias:
+        paciente_repo.guardar_cambios()
+    return creados
+
+
+def _verificar_acceso_medico_estudio(usuario_actual_id: int, estudio_id: int):
+    medico = paciente_repo.buscar_medico_por_usuario_id(usuario_actual_id)
+    if medico is None:
+        raise ErrorDominio(
+            "Solo un medico tratante o gerente medico puede consultar estudios vinculados.",
+            codigo="FORBIDDEN_ROLE",
+            http_status=403,
+        )
+
+    estudio = estudio_repo.buscar_estudio_por_id(estudio_id)
+    if estudio is None:
+        raise ErrorDominio(
+            "El estudio indicado no existe.",
+            codigo="RECURSO_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    autorizado = (
+        estudio.medico_id == medico.id
+        or paciente_repo.medico_esta_autorizado_historia_clinica(estudio.paciente, medico.id)
+    )
+    if not autorizado:
+        raise ErrorDominio(
+            "No tiene permiso para consultar este estudio.",
+            codigo="FORBIDDEN_ESTUDIO",
+            http_status=403,
+        )
+    return estudio
+
+
+def listar_estudios_familiares_vinculados(
+    *,
+    usuario_actual_id: int,
+    estudio_id: int,
+) -> list[dict]:
+    """Lista los estudios de familiares vinculados al estudio origen (E41)."""
+    _verificar_acceso_medico_estudio(usuario_actual_id, estudio_id)
+    vinculos = estudio_repo.listar_vinculos_estudio(estudio_id)
+    return [
+        {
+            "estudio_relacionado_id": v.estudio_relacionado_id,
+            "parentesco": v.parentesco,
+            "paciente_nombre": (
+                f"{v.estudio_relacionado.paciente.usuario.nombre} "
+                f"{v.estudio_relacionado.paciente.usuario.apellido}"
+            ),
+            "patologia_nombre": v.estudio_relacionado.patologia_sospechada.nombre,
+            "estado": v.estudio_relacionado.estado.value,
+            "tiene_resultado": any(a.resultado is not None for a in v.estudio_relacionado.analisis),
+        }
+        for v in vinculos
+    ]
+
+
+def consultar_estudio_familiar_vinculado(
+    *,
+    usuario_actual_id: int,
+    estudio_id: int,
+    estudio_relacionado_id: int,
+) -> dict:
+    """Devuelve detalle genetico y resultado de un estudio familiar vinculado (sin datos de pago)."""
+    _verificar_acceso_medico_estudio(usuario_actual_id, estudio_id)
+    vinculo = estudio_repo.buscar_vinculo_estudio(estudio_id, estudio_relacionado_id)
+    if vinculo is None:
+        raise ErrorDominio(
+            "No existe un vinculo familiar autorizado hacia el estudio solicitado.",
+            codigo="VINCULO_FAMILIAR_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    rel = estudio_repo.buscar_estudio_por_id(estudio_relacionado_id)
+    if rel is None:
+        raise ErrorDominio(
+            "El estudio vinculado no existe.",
+            codigo="RECURSO_NO_ENCONTRADO",
+            http_status=404,
+        )
+
+    resultados = [
+        {
+            "analisis_id": a.id,
+            "tipo": a.tipo.value,
+            "positivo": a.resultado.positivo,
+        }
+        for a in rel.analisis
+        if a.resultado is not None
+    ]
+
+    return {
+        "estudio_id": rel.id,
+        "parentesco": vinculo.parentesco,
+        "paciente_nombre": f"{rel.paciente.usuario.nombre} {rel.paciente.usuario.apellido}",
+        "patologia_nombre": rel.patologia_sospechada.nombre,
+        "estado": rel.estado.value,
+        "es_pompe_urgente": rel.es_pompe_urgente,
+        "genes": [{"simbolo": eg.gen.simbolo, "origen": eg.origen.value} for eg in rel.genes],
+        "resultados": resultados,
     }

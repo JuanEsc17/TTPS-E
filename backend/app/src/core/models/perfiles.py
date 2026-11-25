@@ -91,7 +91,11 @@ class Paciente(Base):
     medico: Mapped[Medico] = relationship(back_populates="pacientes")
     diagnostico_presuntivo: Mapped[Patologia] = relationship()
     sintomas: Mapped[list[Sintoma]] = relationship(secondary="pacientes_sintomas")
-    familiares: Mapped[list[Familiar]] = relationship(back_populates="paciente", cascade="all, delete-orphan")
+    familiares: Mapped[list[Familiar]] = relationship(
+        back_populates="paciente",
+        foreign_keys="Familiar.paciente_id",
+        cascade="all, delete-orphan",
+    )
     estudios: Mapped[list[Estudio]] = relationship(back_populates="paciente")
     turnos: Mapped[list[Turno]] = relationship(back_populates="paciente")
     autorizaciones_medicos: Mapped[list[PacienteMedicoAutorizado]] = relationship(

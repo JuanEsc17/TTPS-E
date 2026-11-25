@@ -10,7 +10,12 @@ class FamiliarInputSchema(Schema):
     nombre = fields.Str(required=True, validate=validate.Length(min=1, max=150))
     diagnostico_previo = fields.Str(required=False, allow_none=True, load_default=None)
     sintomas_snomed_ids = fields.List(fields.Str(), required=False, load_default=list)
-
+    dni = fields.Str(
+        required=False,
+        allow_none=True,
+        load_default=None,
+        validate=validate.Regexp(r"^\d{7,10}$", error="El DNI del familiar debe tener entre 7 y 10 digitos numericos."),
+    )
 
 class AltaPacienteSchema(Schema):
     class Meta:

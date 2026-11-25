@@ -76,6 +76,7 @@ export default function AltaPacientePage({ sesion }) {
     const [familiares, setFamiliares] = useState([]);
     const [nuevoFamParentesco, setNuevoFamParentesco] = useState("padre");
     const [nuevoFamNombre, setNuevoFamNombre] = useState("");
+    const [nuevoFamDni, setNuevoFamDni] = useState("");
     const [nuevoFamDiag, setNuevoFamDiag] = useState("");
 
     const [enviando, setEnviando] = useState(false);
@@ -210,16 +211,24 @@ export default function AltaPacientePage({ sesion }) {
 
     function agregarFamiliar() {
         if (!nuevoFamNombre.trim()) return;
+        const dniFamLimpio = nuevoFamDni.trim();
+        if (dniFamLimpio && !/^\d{7,10}$/.test(dniFamLimpio)) {
+            setError("El DNI del familiar debe tener entre 7 y 10 dígitos.");
+            return;
+        }
+        setError("");
         setFamiliares((prev) => [
             ...prev,
             {
                 parentesco: nuevoFamParentesco,
                 nombre: nuevoFamNombre.trim(),
+                dni: dniFamLimpio || null,
                 diagnostico_previo: nuevoFamDiag.trim() || null,
                 sintomas_snomed_ids: [],
             },
         ]);
         setNuevoFamNombre("");
+        setNuevoFamDni("");
         setNuevoFamDiag("");
     }
 
@@ -620,7 +629,7 @@ export default function AltaPacientePage({ sesion }) {
 
                         {!sinInfoFamiliar && (
                             <>
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-4">
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
                                     <select
                                         value={nuevoFamParentesco}
                                         onChange={(e) => setNuevoFamParentesco(e.target.value)}
@@ -636,6 +645,15 @@ export default function AltaPacientePage({ sesion }) {
                                         onChange={(e) => setNuevoFamNombre(e.target.value)}
                                         placeholder="Nombre completo del familiar"
                                         className="campo-clinico"
+                                    />
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        value={nuevoFamDni}
+                                        onChange={(e) => setNuevoFamDni(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                                        placeholder="DNI (opcional)"
+                                        className="campo-clinico font-mono"
                                     />
                                     <input
                                         type="text"
@@ -662,6 +680,7 @@ export default function AltaPacientePage({ sesion }) {
                                             >
                                                 <span>
                                                     <strong className="capitalize">{f.parentesco}:</strong> {f.nombre}
+                                                    {f.dni ? ` · DNI ${f.dni}` : ""}
                                                     {f.diagnostico_previo ? ` · Dx: ${f.diagnostico_previo}` : ""}
                                                 </span>
                                                 <button

@@ -44,6 +44,7 @@ export default function FamiliaresPacientePage({ sesion }) {
     // Formulario para agregar un familiar
     const [parentesco, setParentesco] = useState("padre");
     const [nombre, setNombre] = useState("");
+    const [dniFam, setDniFam] = useState("");
     const [diagPrevio, setDiagPrevio] = useState("");
     const [busquedaSnomed, setBusquedaSnomed] = useState("");
     const [resultadosSnomed, setResultadosSnomed] = useState([]);
@@ -59,6 +60,7 @@ export default function FamiliaresPacientePage({ sesion }) {
             setFamiliares(
                 (info.familiares || []).map((f) => ({
                     nombre: f.nombre,
+                    dni: f.dni || "",
                     parentesco: f.parentesco,
                     diagnostico_previo: f.diagnostico_previo || "",
                     sintomas: f.sintomas || [],
@@ -111,17 +113,24 @@ export default function FamiliaresPacientePage({ sesion }) {
             setError("Ingresá el nombre completo del familiar.");
             return;
         }
+        const dniLimpio = dniFam.trim();
+        if (dniLimpio && !/^\d{7,10}$/.test(dniLimpio)) {
+            setError("El DNI del familiar debe tener entre 7 y 10 dígitos.");
+            return;
+        }
         setError("");
         setFamiliares((prev) => [
             ...prev,
             {
                 nombre: nombre.trim(),
+                dni: dniLimpio,
                 parentesco,
                 diagnostico_previo: diagPrevio.trim() || null,
                 sintomas: sintomasFam,
             },
         ]);
         setNombre("");
+        setDniFam("");
         setDiagPrevio("");
         setSintomasFam([]);
         setResultadosSnomed([]);
@@ -139,6 +148,7 @@ export default function FamiliaresPacientePage({ sesion }) {
         try {
             const payload = listaAEnviar.map((f) => ({
                 nombre: f.nombre,
+                dni: f.dni?.trim() || null,
                 parentesco: f.parentesco,
                 diagnostico_previo: f.diagnostico_previo || null,
                 sintomas_snomed_ids: (f.sintomas || []).map((s) => s.snomed_id),
@@ -228,6 +238,7 @@ export default function FamiliaresPacientePage({ sesion }) {
                                             <div>
                                                 <p className="font-semibold text-slate-900">
                                                     <span className="capitalize text-[#0B4F8A]">{f.parentesco}:</span> {f.nombre}
+                                                    {f.dni ? <span className="ml-2 font-mono text-[11px] font-normal text-slate-500">DNI {f.dni}</span> : null}
                                                 </p>
                                                 {f.diagnostico_previo && (
                                                     <p className="mt-0.5 text-slate-600">
@@ -257,7 +268,7 @@ export default function FamiliaresPacientePage({ sesion }) {
                                 <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-600">
                                     Agregar familiar
                                 </h3>
-                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                                     <select
                                         value={parentesco}
                                         onChange={(e) => setParentesco(e.target.value)}
@@ -273,6 +284,15 @@ export default function FamiliaresPacientePage({ sesion }) {
                                         onChange={(e) => setNombre(e.target.value)}
                                         placeholder="Nombre completo"
                                         className="campo-clinico"
+                                    />
+                                    <input
+                                        type="text"
+                                        inputMode="numeric"
+                                        maxLength={10}
+                                        value={dniFam}
+                                        onChange={(e) => setDniFam(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                                        placeholder="DNI (opcional, para vincular estudios)"
+                                        className="campo-clinico font-mono"
                                     />
                                     <input
                                         type="text"

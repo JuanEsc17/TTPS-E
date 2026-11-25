@@ -51,3 +51,23 @@ def buscar_genes():
 def listar_obras_sociales():
     resultado = estudio_service.listar_obras_sociales()
     return jsonify({"ok": True, "data": resultado}), 200
+
+@estudios_bp.get("/estudios/<int:estudio_id>/familiares-vinculados")
+@requiere_sesion(roles=(Rol.MEDICO, Rol.GERENTE_MEDICO))
+def listar_estudios_familiares_vinculados(estudio_id: int):
+    vinculos = estudio_service.listar_estudios_familiares_vinculados(
+        usuario_actual_id=g.usuario_actual.id,
+        estudio_id=estudio_id,
+    )
+    return jsonify({"ok": True, "data": vinculos}), 200
+
+
+@estudios_bp.get("/estudios/<int:estudio_id>/familiares-vinculados/<int:estudio_relacionado_id>")
+@requiere_sesion(roles=(Rol.MEDICO, Rol.GERENTE_MEDICO))
+def consultar_estudio_familiar_vinculado(estudio_id: int, estudio_relacionado_id: int):
+    detalle = estudio_service.consultar_estudio_familiar_vinculado(
+        usuario_actual_id=g.usuario_actual.id,
+        estudio_id=estudio_id,
+        estudio_relacionado_id=estudio_relacionado_id,
+    )
+    return jsonify({"ok": True, "data": detalle}), 200
