@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +27,7 @@ from src.core.models import (
     Medico,
     OrigenGen,
     Paciente,
+    PacienteMedicoAutorizado,
     Presupuesto,
     Resultado,
     TipoAnalisis,
@@ -107,12 +108,19 @@ def listar_estudios_de_paciente(usuario_id: int) -> list[Estudio]:
 
 
 def listar_estudios_de_medico(medico_id: int) -> list[Estudio]:
-    """Lista estudios derivados por el medico o con reanalisis solicitado por el."""
+    """Lista estudios derivados, reanalizados o con autorizacion activa de historia clinica."""
     stmt = (
         select(Estudio)
         .where(
             (Estudio.medico_id == medico_id)
             | Estudio.analisis.any(Analisis.solicitado_por_id == medico_id)
+            | exists(
+                select(1).where(
+                    PacienteMedicoAutorizado.paciente_id == Estudio.paciente_id,
+                    PacienteMedicoAutorizado.medico_id == medico_id,
+                    PacienteMedicoAutorizado.activa,
+                )
+            )
         )
         .options(*_opciones_estudio_completo())
         .order_by(Estudio.id.desc())

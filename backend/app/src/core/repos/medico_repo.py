@@ -3,6 +3,7 @@ import logging
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.orm import selectinload
 from src.core.database import db
 from src.core.models import (
     Especialidad,
@@ -34,6 +35,59 @@ def buscar_medico_por_matricula(matricula: str) -> Medico | None:
     """Busca un medico por su numero de matricula."""
     stmt = select(Medico).where(Medico.matricula == matricula)
     return db.session.scalar(stmt)
+
+
+def listar_directorio_medicos(
+    *,
+    q: str | None = None,
+    especialidad_id: int | None = None,
+) -> list[Medico]:
+    """Lista medicos habilitados con sus especialidades, filtrando por texto o especialidad."""
+    stmt = (
+        select(Medico)
+        .join(Usuario, Medico.usuario_id == Usuario.id)
+        .where(Usuario.rol.in_((Rol.MEDICO, Rol.GERENTE_MEDICO)))
+        .options(
+            selectinload(Medico.usuario),
+            selectinload(Medico.especialidades),
+        )
+    )
+    if especialidad_id is not None:
+        stmt = stmt.where(Medico.especialidades.any(Especialidad.id == especialidad_id))
+
+    if q:
+        escapado = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        patron = f"%{escapado}%"
+        nombre_completo = Usuario.nombre.concat(" ").concat(Usuario.apellido)
+        stmt = stmt.where(
+            Usuario.nombre.ilike(patron, escape="\\")
+            | Usuario.apellido.ilike(patron, escape="\\")
+            | nombre_completo.ilike(patron, escape="\\")
+            | Medico.matricula.ilike(patron, escape="\\")
+            | Medico.especialidades.any(Especialidad.nombre.ilike(patron, escape="\\"))
+        )
+
+    stmt = stmt.order_by(Usuario.apellido.asc(), Usuario.nombre.asc(), Medico.id.asc())
+    return list(db.session.scalars(stmt).all())
+
+
+def buscar_medicos_por_ids(medicos_ids: list[int]) -> list[Medico]:
+    """Obtiene medicos habilitados cuyos IDs pertenecen a la lista dada."""
+    if not medicos_ids:
+        return []
+    stmt = (
+        select(Medico)
+        .join(Usuario, Medico.usuario_id == Usuario.id)
+        .where(
+            Medico.id.in_(medicos_ids),
+            Usuario.rol.in_((Rol.MEDICO, Rol.GERENTE_MEDICO)),
+        )
+        .options(
+            selectinload(Medico.usuario),
+            selectinload(Medico.especialidades),
+        )
+    )
+    return list(db.session.scalars(stmt).all())
 
 
 def crear_medico_completo(

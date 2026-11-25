@@ -19,6 +19,7 @@ async function parseResponse(resp, fallbackMsg) {
         }
         const err = new Error(mensaje);
         err.code = data.code;
+        err.status = resp.status;
         err.retryable = Boolean(data.retryable);
         throw err;
     }
@@ -121,4 +122,45 @@ export async function actualizarHistoriaClinicaRequest(token, pacienteId, histor
         body: JSON.stringify({ historia_clinica: historiaClinica }),
     });
     return parseResponse(resp, "No se pudo actualizar la historia clínica.");
+}
+
+export async function listarMedicosAutorizadosRequest(token, { signal } = {}) {
+    const resp = await fetch("/api/v1/pacientes/mi-perfil/medicos-autorizados", {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+    });
+    return parseResponse(resp, "No se pudieron cargar los médicos autorizados.");
+}
+
+export async function autorizarMedicosRequest(token, { medicosIds, motivo = "" }) {
+    const body = { medicos_ids: medicosIds };
+    if (motivo && motivo.trim()) {
+        body.motivo = motivo.trim();
+    }
+    const resp = await fetch("/api/v1/pacientes/mi-perfil/medicos-autorizados", {
+        method: "POST",
+        headers: authHeaders(token),
+        body: JSON.stringify(body),
+    });
+    return parseResponse(resp, "No se pudo otorgar la autorización a los médicos seleccionados.");
+}
+
+export async function revocarAutorizacionMedicoRequest(token, medicoId, { motivo = "" } = {}) {
+    const opciones = {
+        method: "DELETE",
+        headers: authHeaders(token),
+    };
+    if (motivo && motivo.trim()) {
+        opciones.body = JSON.stringify({ motivo: motivo.trim() });
+    }
+    const resp = await fetch(`/api/v1/pacientes/mi-perfil/medicos-autorizados/${medicoId}`, opciones);
+    return parseResponse(resp, "No se pudo revocar la autorización del médico.");
+}
+
+export async function obtenerHistoriaClinicaRequest(token, pacienteId, { signal } = {}) {
+    const resp = await fetch(`/api/v1/pacientes/${pacienteId}/historia-clinica`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal,
+    });
+    return parseResponse(resp, "No se pudo consultar la historia clínica del paciente.");
 }

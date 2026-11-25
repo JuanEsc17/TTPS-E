@@ -1,14 +1,16 @@
-"""Logica de negocio para el registro de medicos y consulta de especialidades."""
+"""Logica de negocio para medicos, directorio y consulta de especialidades."""
+import logging
 import re
 
-from src.core.repos import medico_repo, usuario_repo
-from src.core.services.excepciones import ErrorDominio
+from src.core.repos import medico_repo, paciente_repo, usuario_repo
+from src.core.services.excepciones import ErrorDominio, ErrorNoEncontrado
 from src.core.services.seguridad import (
     hashear_password,
     sha256_hex,
     validar_politica_password,
 )
 
+logger = logging.getLogger(__name__)
 _REGEX_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _REGEX_TELEFONO = re.compile(r"^\+?[\d\s\-()]{7,20}$")
 
@@ -17,6 +19,58 @@ def listar_especialidades() -> list[dict]:
     """Retorna el catalogo de especialidades disponibles."""
     especialidades = medico_repo.listar_especialidades()
     return [{"id": esp.id, "nombre": esp.nombre} for esp in especialidades]
+
+
+def listar_directorio_medicos_paciente(
+    *,
+    usuario_actual_id: int,
+    q: str | None = None,
+    especialidad_id: int | None = None,
+) -> dict:
+    """Retorna el directorio publico de medicos habilitados con estado de autorizacion del paciente."""
+    paciente = paciente_repo.buscar_paciente_por_usuario_id(usuario_actual_id)
+    if paciente is None:
+        raise ErrorNoEncontrado(
+            "No se encontro un perfil de paciente asociado a su cuenta.",
+            codigo="PACIENTE_NO_ENCONTRADO",
+        )
+
+    activas = paciente_repo.listar_autorizaciones_activas(paciente.id)
+    if activas or paciente_repo.tiene_historial_autorizaciones(paciente.id):
+        ids_autorizados = sorted(a.medico_id for a in activas)
+    elif paciente.medico_id is not None:
+        ids_autorizados = [paciente.medico_id]
+    else:
+        ids_autorizados = []
+
+    autorizados_set = set(ids_autorizados)
+    filtro_q = (q or "").strip() or None
+    medicos = medico_repo.listar_directorio_medicos(q=filtro_q, especialidad_id=especialidad_id)
+
+    logger.info(
+        "[paciente_service] STEP 1 directorio_medicos_consultado paciente_id=%s",
+        paciente.id,
+    )
+    # Solo se exponen datos profesionales publicos (nunca email, telefono ni credenciales)
+    return {
+        "medicos": [
+            {
+                "medico_id": m.id,
+                "nombre": m.usuario.nombre,
+                "apellido": m.usuario.apellido,
+                "nombre_completo": f"{m.usuario.nombre} {m.usuario.apellido}".strip(),
+                "matricula": m.matricula,
+                "especialidades": [
+                    {"id": esp.id, "nombre": esp.nombre}
+                    for esp in sorted(m.especialidades, key=lambda e: e.nombre.lower())
+                ],
+                "autorizado": m.id in autorizados_set,
+                "es_medico_alta": m.id == paciente.medico_id,
+            }
+            for m in medicos
+        ],
+        "medicos_autorizados_activos_ids": ids_autorizados,
+    }
 
 
 def _validar_datos_medico(

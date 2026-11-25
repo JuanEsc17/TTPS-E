@@ -33,7 +33,12 @@ from src.core.models import (
     Usuario,
     Variante,
 )
-from src.core.repos import bioinformatica_repo, clinica_repo, usuario_repo
+from src.core.repos import (
+    bioinformatica_repo,
+    clinica_repo,
+    paciente_repo,
+    usuario_repo,
+)
 from src.core.services import (
     almacenamiento_service,
     auditoria_service,
@@ -1167,10 +1172,11 @@ def solicitar_reanalisis_estudio(
     if estudio is None:
         raise ErrorDominio("Estudio no encontrado.", codigo="ESTUDIO_NO_ENCONTRADO", http_status=404)
 
-    es_medico_autorizado = estudio.medico_id == medico.id or any(
-        a.solicitado_por_id == medico.id for a in estudio.analisis
+    es_medico_autorizado = (
+        estudio.medico_id == medico.id
+        or any(a.solicitado_por_id == medico.id for a in estudio.analisis)
+        or paciente_repo.medico_tiene_autorizacion_activa(estudio.paciente_id, medico.id)
     )
-    # shortcut: pacientes_medicos_autorizados (Escenario 40) aun no existe en models/; extender aqui al implementarlo
     if not es_medico_autorizado:
         logger.warning(
             "[estudio_service] reanalisis_denegado estudio_id=%s usuario_id=%s medico_id=%s",

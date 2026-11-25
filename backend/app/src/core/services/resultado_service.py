@@ -33,7 +33,7 @@ from src.core.models import (
     Variante,
     calcular_conclusion_diagnostica,
 )
-from src.core.repos import auditoria_repo, bioinformatica_repo
+from src.core.repos import auditoria_repo, bioinformatica_repo, paciente_repo
 from src.core.services import almacenamiento_service, auditoria_service
 from src.core.services.excepciones import ErrorDominio
 from src.core.services.formato_correo import asunto_correo, formatear_correo
@@ -422,9 +422,12 @@ def _verificar_acceso_resultado(estudio: Estudio, usuario: Usuario) -> None:
         if estudio.medico is not None and estudio.medico.usuario_id == usuario.id:
             return
         medico = bioinformatica_repo.buscar_medico_por_usuario_id(usuario.id)
-        if medico is not None and any(a.solicitado_por_id == medico.id for a in estudio.analisis):
+        if medico is not None and (
+            any(a.solicitado_por_id == medico.id for a in estudio.analisis)
+            or paciente_repo.medico_tiene_autorizacion_activa(estudio.paciente_id, medico.id)
+        ):
             return
-        # shortcut: pacientes_medicos_autorizados (Escenario 40) y estudios_familiares_vinculados (Escenario 41) aun no existen en models/; extender aqui al implementarlos
+        # shortcut: estudios_familiares_vinculados (Escenario 41) aun no existe en models/; extender aqui al implementarlo
         _denegar_acceso_resultado(estudio.id, usuario)
     _denegar_acceso_resultado(estudio.id, usuario)
 

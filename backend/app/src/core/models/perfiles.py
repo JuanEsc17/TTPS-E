@@ -1,10 +1,20 @@
 """Perfiles por rol: medicos, transportistas y pacientes."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Date, ForeignKey, String, Text
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    func,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -42,6 +52,10 @@ class Medico(Base):
     usuario: Mapped[Usuario] = relationship(back_populates="medico")
     especialidades: Mapped[list[Especialidad]] = relationship(secondary="medicos_especialidades")
     pacientes: Mapped[list[Paciente]] = relationship(back_populates="medico")
+    autorizaciones_pacientes: Mapped[list[PacienteMedicoAutorizado]] = relationship(
+        back_populates="medico",
+        cascade="all, delete-orphan",
+    )
     estudios: Mapped[list[Estudio]] = relationship(back_populates="medico")
 
 
@@ -80,3 +94,48 @@ class Paciente(Base):
     familiares: Mapped[list[Familiar]] = relationship(back_populates="paciente", cascade="all, delete-orphan")
     estudios: Mapped[list[Estudio]] = relationship(back_populates="paciente")
     turnos: Mapped[list[Turno]] = relationship(back_populates="paciente")
+    autorizaciones_medicos: Mapped[list[PacienteMedicoAutorizado]] = relationship(
+        back_populates="paciente",
+        cascade="all, delete-orphan",
+    )
+
+
+class PacienteMedicoAutorizado(Base):
+    """Autorizacion explicita del paciente para que un medico consulte su historia clinica (ADR-002)."""
+    __tablename__ = "pacientes_medicos_autorizados"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    paciente_id: Mapped[int] = mapped_column(
+        ForeignKey("pacientes.id", ondelete="CASCADE"), index=True
+    )
+    medico_id: Mapped[int] = mapped_column(
+        ForeignKey("medicos.id", ondelete="CASCADE"), index=True
+    )
+    otorgada_por_usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), index=True)
+    activa: Mapped[bool] = mapped_column(Boolean, default=True)
+    otorgada_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    revocada_en: Mapped[datetime | None] = mapped_column(DateTime, default=None)
+
+    paciente: Mapped[Paciente] = relationship(back_populates="autorizaciones_medicos")
+    medico: Mapped[Medico] = relationship(back_populates="autorizaciones_pacientes")
+    otorgada_por: Mapped[Usuario] = relationship()
+
+    __table_args__ = (
+        # Impide duplicar autorizaciones activas del mismo par preservando historial revocado
+        Index(
+            "uq_paciente_medico_activo",
+            "paciente_id",
+            "medico_id",
+            unique=True,
+            sqlite_where=text("activa"),
+            postgresql_where=text("activa"),
+        ),
+        # Acelera consultas inversas por medico (Index-Only Scan en PostgreSQL)
+        Index(
+            "idx_pma_medico_activo",
+            "medico_id",
+            "paciente_id",
+            sqlite_where=text("activa"),
+            postgresql_where=text("activa"),
+        ),
+    )
