@@ -223,6 +223,10 @@ export default function CampanaAvisos({ sesion }) {
                                         rol === "bioinformatico" &&
                                         !esResultado &&
                                         /reanalisis|bioinformatic/i.test(aviso.mensaje || "");
+                                    const esSampleSet =
+                                        rol === "administrativo" &&
+                                        !esResultado &&
+                                        /sampleset|sample.?set/i.test(aviso.mensaje || "");
                                     const esSolicitarTurno =
                                         rol === "paciente" &&
                                         !esResultado &&
@@ -272,6 +276,18 @@ export default function CampanaAvisos({ sesion }) {
                                                         className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
                                                     >
                                                         Ir a bandeja →
+                                                    </Link>
+                                                ) : esSampleSet ? (
+                                                    <Link
+                                                        to={
+                                                            aviso.sample_set_id
+                                                                ? `/administracion/sample-sets?sampleSetId=${aviso.sample_set_id}`
+                                                                : "/administracion/sample-sets"
+                                                        }
+                                                        onClick={() => setAbierto(false)}
+                                                        className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
+                                                    >
+                                                        Ver sample set →
                                                     </Link>
                                                 ) : rol === "paciente" &&
                                                   Boolean(aviso.turno_id) &&

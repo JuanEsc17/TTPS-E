@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 _EMAIL_CLIENT_ORIGINAL = EmailClient
 _PATRON_ESTUDIO_AVISO = re.compile(r"estudio #(\d+)(?!\d)", re.IGNORECASE)
 _PATRON_TURNO_AVISO = re.compile(r"turno #(\d+)(?!\d)", re.IGNORECASE)
+_PATRON_SAMPLE_SET_AVISO = re.compile(r"sampleset #(\d+)(?!\d)", re.IGNORECASE)
 _ROLES_PERMITIDOS_RESULTADO = frozenset(
     {Rol.PACIENTE, Rol.MEDICO, Rol.GERENTE_MEDICO, Rol.BIOINFORMATICO}
 )
@@ -784,6 +785,11 @@ def _extraer_turno_id_aviso(mensaje: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def _extraer_sample_set_id_aviso(mensaje: str) -> int | None:
+    match = _PATRON_SAMPLE_SET_AVISO.search(mensaje or "")
+    return int(match.group(1)) if match else None
+
+
 def listar_avisos_usuario(
     *,
     usuario: Usuario,
@@ -818,6 +824,7 @@ def listar_avisos_usuario(
                 "created_at": a.created_at.isoformat() if a.created_at else None,
                 "estudio_id": _extraer_estudio_id_aviso(a.mensaje),
                 "turno_id": _extraer_turno_id_aviso(a.mensaje),
+                "sample_set_id": _extraer_sample_set_id_aviso(a.mensaje),
             }
             for a in avisos
         ],

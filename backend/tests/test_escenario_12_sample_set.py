@@ -449,3 +449,45 @@ def test_tc06_estado_invalido_idempotencia_y_consulta_endpoints(app, client, ses
     assert r_det.status_code == 200
     assert r_det.get_json()["sample_set"]["muestras"][0]["muestra_id"] == m_id
     assert client.get("/api/sample-sets/99999", headers=headers_admin).status_code == 404
+
+
+
+def test_aviso_admin_por_cierre_sample_set_normal_y_pompe_urgente(app, client, session):
+    """Al cerrar un SampleSet (10/10 o Pompe urgente), GET /api/avisos entrega el aviso con sample_set_id."""
+    viaje_1 = _crear_viaje_retirado(
+        session,
+        cantidad=2,
+        fecha_orden=date(2026, 11, 17),
+        es_pompe_urgente=False,
+    )
+    headers_transp = _auth_header_para(app, viaje_1["u_transp"])
+    headers_admin = _auth_header_para(app, viaje_1["u_admin"])
+
+    assert (
+        client.post(
+            f"/api/logistica/ordenes-del-dia/{viaje_1['orden'].id}/llegada-laboratorio-central",
+            headers=headers_transp,
+        ).status_code
+        == 200
+    )
+
+    viaje_pompe = _crear_viaje_retirado(
+        session,
+        cantidad=1,
+        fecha_orden=date(2026, 11, 18),
+        es_pompe_urgente=True,
+    )
+    resp_cierre = client.post(
+        f"/api/logistica/ordenes-del-dia/{viaje_pompe['orden'].id}/llegada-laboratorio-central",
+        headers=headers_transp,
+    )
+    assert resp_cierre.status_code == 200
+    ss_id = resp_cierre.get_json()["data"]["sample_sets_afectados_ids"][0]
+
+    res_avisos = client.get("/api/avisos", headers=headers_admin)
+    assert res_avisos.status_code == 200
+    avisos = res_avisos.get_json()["avisos"]
+    aviso_ss = next((a for a in avisos if a.get("sample_set_id") == ss_id), None)
+    assert aviso_ss is not None
+    assert "POMPE URGENTE" in aviso_ss["mensaje"]
+    assert "(3/10" in aviso_ss["mensaje"]

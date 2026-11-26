@@ -24,6 +24,7 @@ const MENU_POR_ROL = {
     administrativo: [
         { to: "/administracion/presupuestos", label: "Presupuestos" },
         { to: "/administracion/muestras", label: "Registro de muestras" },
+        { to: "/administracion/sample-sets", label: "Sample sets" },
         { to: "/administracion/remuestreos", label: "Remuestreos" },
         { to: "/administracion/estudios", label: "Carga de datos ACTG" }],
     bioinformatico: [{ to: "/bioinformatica/cola", label: "Estudios en análisis" }],

@@ -21,6 +21,7 @@ import DatosCrudosAdminPage from "./pages/DatosCrudosAdminPage";
 import BioinformaticaPage from "./pages/BioinformaticaPage";
 import RegistroMuestraAdminPage from "./pages/RegistroMuestraAdminPage";
 import RemuestreoAdminPage from "./pages/RemuestreoAdminPage";
+import SampleSetsAdminPage from "./pages/SampleSetsAdminPage";
 import PresupuestosAdminPage from "./pages/PresupuestosAdminPage";
 import EstudiosResultadosPage from "./pages/EstudiosResultadosPage";
 import ResultadoEstudioPage from "./pages/ResultadoEstudioPage";
@@ -103,6 +104,10 @@ export default function App() {
           <Route
             path="/administracion/muestras"
             element={<RegistroMuestraAdminPage sesion={sesion} />}
+          />
+          <Route
+            path="/administracion/sample-sets"
+            element={<SampleSetsAdminPage sesion={sesion} />}
           />
           <Route
             path="/administracion/remuestreos"

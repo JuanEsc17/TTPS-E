@@ -9,8 +9,8 @@ from src.core.services.excepciones import ErrorDominio
 
 
 def _es_pompe_urgente(patologia_nombre: str, fecha_nacimiento: date) -> bool:
-    """Retorna True si la patologia es Pompe y el paciente tiene menos de 4 meses."""
-    if patologia_nombre.strip().lower() != "pompe":
+    """Retorna True si la patologia corresponde a Pompe y el paciente tiene menos de 4 meses."""
+    if "pompe" not in (patologia_nombre or "").strip().lower():
         return False
     hoy = date.today()
     meses = (hoy.year - fecha_nacimiento.year) * 12 + (hoy.month - fecha_nacimiento.month)

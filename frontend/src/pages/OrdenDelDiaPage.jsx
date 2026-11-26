@@ -196,9 +196,17 @@ export default function OrdenDelDiaPage({ sesion }) {
                 };
             });
             const cant = res.muestras_recibidas_ids?.length || 0;
+            const setsIds = Array.isArray(res.sample_sets_afectados_ids)
+                ? res.sample_sets_afectados_ids
+                : [];
+            const textoSets =
+                setsIds.length > 0
+                    ? ` · SampleSet${setsIds.length === 1 ? "" : "s"} actualizado${setsIds.length === 1 ? "" : "s"}: ${setsIds.map((id) => `#${id}`).join(", ")}`
+                    : "";
+            window.dispatchEvent(new CustomEvent("avisos:actualizar"));
             setAviso({
                 tipo: "ok",
-                texto: `Llegada al laboratorio central registrada (${cant} muestra${cant === 1 ? "" : "s"} recibida${cant === 1 ? "" : "s"}).`,
+                texto: `Llegada al laboratorio central registrada (${cant} muestra${cant === 1 ? "" : "s"} recibida${cant === 1 ? "" : "s"}${textoSets}).`,
             });
         } catch (err) {
             setError(err.message);
