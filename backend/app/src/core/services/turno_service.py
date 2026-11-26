@@ -118,6 +118,7 @@ class TurnoService:
                             "duracion_minutos": DURACION_SLOT_MINUTOS,
                             "ausencias_acumuladas": e.ausencias,
                             "max_ausencias": MAX_AUSENCIAS,
+                            "consentimiento_pdf_url": f"/api/v1/turnos/{turno_activo.id}/consentimiento-pdf",
                             "centro": cls._serializar_centro_dict(turno_activo.centro),
                         }
                         if turno_activo
@@ -180,6 +181,8 @@ class TurnoService:
                         if (muestra_turno and muestra_turno.tomada_en)
                         else None
                     ),
+                    "consentimiento_pdf_disponible": bool(t.activo or t.asistio is True),
+                    "consentimiento_pdf_url": f"/api/v1/turnos/{t.id}/consentimiento-pdf",
                     "centro": cls._serializar_centro_dict(t.centro),
                 }
             )
@@ -366,7 +369,7 @@ class TurnoService:
             )
             estudio.estado = EstadoEstudio.TURNO_SACADO
 
-            # Generar aviso pendiente de envio
+            # Generar aviso pendiente de envio por mail (recordatorio)
             mensaje_aviso = (
                 f"Turno reservado para el {inicio.strftime('%d/%m/%Y %H:%M')} en {centro.nombre}. "
                 f"Recuerde que al acumular {MAX_AUSENCIAS} ausencias perdera el pago del estudio."
@@ -378,7 +381,26 @@ class TurnoService:
                 enviado=False,
             )
 
-            # Despacho de correo y documentacion mediante EmailClient
+            # Generar PDF de Orden de Extraccion y Consentimiento Informado y guardarlo junto al turno
+            ruta_pdf, error_pdf, status_pdf = cls._generar_y_guardar_consentimiento_pdf(turno.id)
+            if error_pdf:
+                TurnoRepo.deshacer_cambios()
+                return None, error_pdf, status_pdf
+
+            # Emitir aviso in-app (CanalAviso.APP) con descarga directa del PDF
+            mensaje_aviso_app = (
+                f"Orden de extracción y Consentimiento informado (PDF) disponibles para el Turno #{turno.id} "
+                f"del Estudio #{estudio.id} ({inicio.strftime('%d/%m/%Y %H:%M')} en {centro.nombre}). "
+                "Descargalos desde este aviso o en Mis turnos."
+            )
+            TurnoRepo.crear_aviso(
+                usuario_id=estudio.paciente.usuario_id,
+                mensaje=mensaje_aviso_app,
+                canal=CanalAviso.APP,
+                enviado=True,
+            )
+
+            # Despacho de correo recordatorio mediante EmailClient
             cliente_email = cls._resolver_email_client(email_client)
 
             if cliente_email is not None:
@@ -416,7 +438,7 @@ class TurnoService:
                                 "Indicaciones importantes",
                                 [
                                     "No requiere ayuno ni preparación especial.",
-                                    "Recuerde llevar impresa y firmada la Orden de extraccion y la plantilla de Consentimiento informado.",
+                                    "El PDF con la Orden de extracción y el Consentimiento informado fue enviado como aviso dentro de la app y quedó guardado en su turno para descargarlo cuando lo necesite (recuerde llevarlo impreso y firmado).",
                                     f"Límite de inasistencias: se permiten hasta {MAX_AUSENCIAS} ausencias máximas. Al acumular {MAX_AUSENCIAS} ausencias perderá el pago del estudio.",
                                 ],
                             ),
@@ -430,6 +452,7 @@ class TurnoService:
                         referencia=f"TURNO-{turno.id}",
                     )
                 except (ClienteError, OSError) as exc:
+                    cls._eliminar_pdf_silencioso(ruta_pdf)
                     TurnoRepo.deshacer_cambios()
                     return (
                         None,
@@ -440,6 +463,7 @@ class TurnoService:
             TurnoRepo.marcar_aviso_enviado(aviso)
             TurnoRepo.guardar_cambios()
         except IntegrityError:
+            cls._eliminar_pdf_silencioso(locals().get("ruta_pdf"))
             TurnoRepo.deshacer_cambios()
             return (
                 None,
@@ -447,6 +471,7 @@ class TurnoService:
                 409,
             )
         except SQLAlchemyError as exc:
+            cls._eliminar_pdf_silencioso(locals().get("ruta_pdf"))
             TurnoRepo.deshacer_cambios()
             return None, f"Error inesperado al registrar el turno: {exc!s}", 500
 
@@ -461,13 +486,117 @@ class TurnoService:
             "estado_estudio": estudio.estado.value,
             "ausencias_acumuladas": estudio.ausencias,
             "max_ausencias": MAX_AUSENCIAS,
+            "consentimiento_pdf_url": f"/api/v1/turnos/{turno.id}/consentimiento-pdf",
             "documentacion_enviada": {
                 "orden_extraccion": True,
                 "consentimiento_informado": True,
                 "recordatorio": True,
+                "canal_pdf": "app",
+                "pdf_url": f"/api/v1/turnos/{turno.id}/consentimiento-pdf",
             },
         }
         return resultado, None, 201
+
+    @staticmethod
+    def ruta_consentimiento_pdf(turno_id: int) -> str:
+        """Retorna la ruta relativa del PDF de orden y consentimiento del turno."""
+        return f"storage/turnos/orden_consentimiento_turno_{turno_id}.pdf"
+
+    @staticmethod
+    def _eliminar_pdf_silencioso(ruta_relativa: str | None) -> None:
+        """Limpia un PDF recien generado ante rollback transaccional sin propagar fallos."""
+        if not ruta_relativa:
+            return
+        from src.clients import ClienteError as _ClienteError
+        from src.core.services import almacenamiento_service
+
+        try:
+            almacenamiento_service.eliminar_archivo(ruta_relativa)
+        except (OSError, _ClienteError):
+            pass
+
+    @classmethod
+    def _generar_y_guardar_consentimiento_pdf(
+        cls, turno_id: int
+    ) -> tuple[str | None, str | None, int]:
+        """Genera y almacena el PDF de Orden de Extraccion y Consentimiento del turno."""
+        from src.clients import ClienteError as _ClienteError
+        from src.core.services import almacenamiento_service
+        from src.core.services.pdf_consentimiento import (
+            construir_pdf_orden_y_consentimiento,
+        )
+
+        turno_pdf = TurnoRepo.obtener_turno_para_pdf(turno_id)
+        if not turno_pdf or not turno_pdf.estudio or not turno_pdf.centro:
+            return None, f"No se pudieron cargar los datos del turno {turno_id} para el PDF.", 500
+
+        ruta_pdf = cls.ruta_consentimiento_pdf(turno_pdf.id)
+        try:
+            pdf_bytes = construir_pdf_orden_y_consentimiento(
+                turno=turno_pdf,
+                estudio=turno_pdf.estudio,
+                centro=turno_pdf.centro,
+            )
+            almacenamiento_service.guardar_bytes(
+                ruta_pdf,
+                pdf_bytes,
+                content_type="application/pdf",
+            )
+        except (OSError, _ClienteError) as exc:
+            return (
+                None,
+                f"No se pudo generar o guardar la orden de extraccion y consentimiento: {exc!s}",
+                502,
+            )
+        return ruta_pdf, None, 200
+
+    @classmethod
+    def descargar_consentimiento_pdf(
+        cls,
+        turno_id: int,
+        usuario_actual_id: int,
+    ) -> tuple[tuple[bytes, str] | None, str | None, int]:
+        """Verifica titularidad del turno y retorna (bytes_pdf, nombre_archivo) para descarga."""
+        from src.clients import ClienteError as _ClienteError
+        from src.core.services import almacenamiento_service
+        from src.core.services.pdf_consentimiento import (
+            construir_pdf_orden_y_consentimiento,
+        )
+
+        turno = TurnoRepo.obtener_turno_para_pdf(turno_id)
+        if not turno:
+            return None, f"El turno con ID {turno_id} no existe.", 404
+
+        paciente = turno.paciente or (turno.estudio.paciente if turno.estudio else None)
+        if not paciente or paciente.usuario_id != usuario_actual_id:
+            return None, "No tiene permisos para descargar la documentacion de este turno.", 403
+
+        if not turno.estudio or not turno.centro:
+            return None, "El turno no tiene estudio o centro asociado para generar el PDF.", 404
+
+        ruta_pdf = cls.ruta_consentimiento_pdf(turno.id)
+        nombre_archivo = f"orden_consentimiento_turno_{turno.id}.pdf"
+        try:
+            pdf_bytes = almacenamiento_service.leer_bytes(ruta_pdf)
+            if pdf_bytes is None:
+                pdf_bytes = construir_pdf_orden_y_consentimiento(
+                    turno=turno,
+                    estudio=turno.estudio,
+                    centro=turno.centro,
+                )
+                almacenamiento_service.guardar_bytes(
+                    ruta_pdf,
+                    pdf_bytes,
+                    content_type="application/pdf",
+                )
+        except (OSError, _ClienteError) as exc:
+            return (
+                None,
+                f"No se pudo recuperar la orden y consentimiento del turno: {exc!s}",
+                502,
+            )
+
+        return (pdf_bytes, nombre_archivo), None, 200
 
     @staticmethod
     def _determinar_estado_retorno_estudio(estudio: Estudio) -> EstadoEstudio:
@@ -515,8 +644,8 @@ class TurnoService:
             TurnoRepo.crear_aviso(
                 usuario_id=turno.paciente.usuario_id,
                 mensaje=(
-                    f"Su turno del {turno.inicio.strftime('%d/%m/%Y %H:%M')} fue cancelado. "
-                    "Ya puede solicitar un nuevo turno de extraccion."
+                    f"Su turno del {turno.inicio.strftime('%d/%m/%Y %H:%M')} "
+                    f"(Estudio #{estudio.id}) fue cancelado. Ya puede solicitar un nuevo turno de extraccion."
                 ),
                 canal=CanalAviso.APP,
                 enviado=True,

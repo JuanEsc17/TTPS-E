@@ -137,6 +137,26 @@ class TurnoRepo:
         return db.session.execute(stmt).scalars().first() is not None
 
     @staticmethod
+    def obtener_turno_para_pdf(turno_id: int) -> Turno | None:
+        """Retorna un turno con centro, paciente, estudio, medico, patologia y genes cargados."""
+        from sqlalchemy.orm import selectinload
+        from src.core.models import EstudioGen, Medico, Paciente
+
+        stmt = (
+            select(Turno)
+            .options(
+                selectinload(Turno.centro),
+                selectinload(Turno.paciente).selectinload(Paciente.usuario),
+                selectinload(Turno.estudio).selectinload(Estudio.paciente).selectinload(Paciente.usuario),
+                selectinload(Turno.estudio).selectinload(Estudio.medico).selectinload(Medico.usuario),
+                selectinload(Turno.estudio).selectinload(Estudio.patologia_sospechada),
+                selectinload(Turno.estudio).selectinload(Estudio.genes).selectinload(EstudioGen.gen),
+            )
+            .where(Turno.id == turno_id)
+        )
+        return db.session.execute(stmt).scalars().first()
+
+    @staticmethod
     def crear_turno(
         centro_id: int,
         paciente_id: int,

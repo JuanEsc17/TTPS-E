@@ -106,3 +106,45 @@ def cancelar_turno(turno_id: int) -> tuple[Any, int]:
 
     return jsonify({"ok": True, "data": resultado}), status
 
+
+@turnos_bp.get("/turnos/<int:turno_id>/consentimiento-pdf")
+@requiere_sesion(roles=[Rol.PACIENTE])
+def descargar_consentimiento_pdf(turno_id: int) -> Any:
+    """Descarga el PDF de Orden de Extraccion y Consentimiento Informado del turno."""
+    from flask import Response
+
+    usuario_actual_id = g.usuario_actual.id
+    resultado, error, status = TurnoService.descargar_consentimiento_pdf(
+        turno_id=turno_id,
+        usuario_actual_id=usuario_actual_id,
+    )
+    if error:
+        codigo = (
+            "FORBIDDEN_NOT_OWNER"
+            if status == 403
+            else ("RECURSO_NO_ENCONTRADO" if status == 404 else "ERROR_PDF")
+        )
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": error,
+                    "code": codigo,
+                    "retryable": status == 502,
+                }
+            ),
+            status,
+        )
+
+    pdf_bytes, nombre_archivo = resultado
+    return Response(
+        pdf_bytes,
+        status=200,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{nombre_archivo}"',
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+

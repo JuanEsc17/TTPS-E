@@ -185,6 +185,8 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
         "orden_extraccion": True,
         "consentimiento_informado": True,
         "recordatorio": True,
+        "canal_pdf": "app",
+        "pdf_url": f"/api/v1/turnos/{data_turno['turno_id']}/consentimiento-pdf",
     }
 
     # Verificar persistencia en BD (Turno, Estudio y Aviso)
@@ -208,7 +210,7 @@ def test_flujo_completo_solicitar_turno_extraccion(app, client, session, datos_e
     _, kwargs_email = mock_email.enviar_aviso.call_args
     assert kwargs_email["destinatarios"] == [usuario_paciente.email]
     assert kwargs_email["referencia"] == f"TURNO-{turno_bd.id}"
-    assert "Orden de extraccion" in kwargs_email["mensaje"]
+    assert "Orden de extracción" in kwargs_email["mensaje"]
     assert "Consentimiento informado" in kwargs_email["mensaje"]
 
     # Paso 4: Consultar disponibilidad nuevamente y comprobar que 10:15 ya no esta libre
@@ -624,3 +626,144 @@ def test_disponibilidad_hoy_filtra_horarios_pasados(app, session, datos_escenari
         assert slots[0].endswith("12:30:00")
         assert slots[-1].endswith("17:45:00")
         assert all(datetime.fromisoformat(s) > ahora_mediodia for s in slots)
+
+
+
+def test_solicitar_turno_genera_pdf_aviso_app_y_permite_descarga(
+    app, client, session, datos_escenario
+):
+    """Al reservar turno se guarda el PDF en el turno, se emite aviso APP y se puede descargar."""
+    from src.core.services import almacenamiento_service
+
+    estudio = datos_escenario["estudio"]
+    centro = datos_escenario["centro"]
+    headers_pac = auth_header_para(app, datos_escenario["usuario_paciente"])
+    headers_otro = auth_header_para(app, datos_escenario["usuario_otro"])
+    headers_med = auth_header_para(app, datos_escenario["usuario_medico"])
+    horario = proximo_dia_habil(11, 15)
+
+    res = client.post(
+        f"/api/v1/estudios/{estudio.id}/turnos",
+        json={"centro_id": centro.id, "inicio": horario.isoformat()},
+        headers=headers_pac,
+    )
+    assert res.status_code == 201
+    data = res.get_json()["data"]
+    turno_id = data["turno_id"]
+    assert data["consentimiento_pdf_url"] == f"/api/v1/turnos/{turno_id}/consentimiento-pdf"
+    assert data["documentacion_enviada"]["canal_pdf"] == "app"
+
+    with app.app_context():
+        pdf_guardado = almacenamiento_service.leer_bytes(
+            f"storage/turnos/orden_consentimiento_turno_{turno_id}.pdf"
+        )
+        assert pdf_guardado is not None
+        assert pdf_guardado.startswith(b"%PDF-")
+
+    aviso_app = (
+        session.query(Aviso)
+        .filter_by(
+            usuario_id=datos_escenario["usuario_paciente"].id,
+            canal=CanalAviso.APP,
+        )
+        .order_by(Aviso.id.desc())
+        .first()
+    )
+    assert aviso_app is not None
+    assert aviso_app.enviado is True
+    assert f"Turno #{turno_id}" in aviso_app.mensaje
+    assert f"Estudio #{estudio.id}" in aviso_app.mensaje
+
+    res_avisos = client.get("/api/avisos", headers=headers_pac)
+    assert res_avisos.status_code == 200
+    avisos_json = res_avisos.get_json()["avisos"]
+    aviso_turno = next((a for a in avisos_json if a["id"] == aviso_app.id), None)
+    assert aviso_turno is not None
+    assert aviso_turno["turno_id"] == turno_id
+    assert aviso_turno["estudio_id"] == estudio.id
+
+    res_mis_turnos = client.get("/api/v1/turnos/mis-turnos", headers=headers_pac)
+    assert res_mis_turnos.status_code == 200
+    turno_listado = res_mis_turnos.get_json()["data"][0]
+    assert turno_listado["consentimiento_pdf_disponible"] is True
+    assert turno_listado["consentimiento_pdf_url"] == f"/api/v1/turnos/{turno_id}/consentimiento-pdf"
+
+    res_pdf = client.get(f"/api/v1/turnos/{turno_id}/consentimiento-pdf", headers=headers_pac)
+    assert res_pdf.status_code == 200
+    assert res_pdf.mimetype == "application/pdf"
+    assert f"orden_consentimiento_turno_{turno_id}.pdf" in res_pdf.headers.get(
+        "Content-Disposition", ""
+    )
+    assert res_pdf.data.startswith(b"%PDF-")
+
+    assert (
+        client.get(
+            f"/api/v1/turnos/{turno_id}/consentimiento-pdf",
+            headers=headers_otro,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            f"/api/v1/turnos/{turno_id}/consentimiento-pdf",
+            headers=headers_med,
+        ).status_code
+        == 403
+    )
+    assert (
+        client.get(
+            "/api/v1/turnos/999999/consentimiento-pdf",
+            headers=headers_pac,
+        ).status_code
+        == 404
+    )
+
+
+def test_consentimiento_pdf_regenera_si_falta_y_limpia_en_rollback(
+    app, client, session, datos_escenario
+):
+    """Regenera el PDF bajo demanda si no esta en disco y lo elimina si falla el alta del turno."""
+    from src.core.services import almacenamiento_service
+
+    estudio = datos_escenario["estudio"]
+    centro = datos_escenario["centro"]
+    headers_pac = auth_header_para(app, datos_escenario["usuario_paciente"])
+
+    # 1. Rollback ante fallo de mail elimina tambien el PDF generado
+    class EmailClientFalla:
+        def enviar_aviso(self, **kwargs):
+            raise ClienteConexionError("Error SMTP simulado")
+
+    app.config["EMAIL_CLIENT"] = EmailClientFalla()
+    res_502 = client.post(
+        f"/api/v1/estudios/{estudio.id}/turnos",
+        json={"centro_id": centro.id, "inicio": proximo_dia_habil(14, 0).isoformat()},
+        headers=headers_pac,
+    )
+    assert res_502.status_code == 502
+    assert session.query(Turno).filter_by(estudio_id=estudio.id).count() == 0
+
+    # 2. Alta exitosa, borrado del archivo en storage y regeneracion en la descarga
+    app.config["EMAIL_CLIENT"] = EmailClient()
+    app.config["EMAIL_CLIENT"].enviar_aviso = MagicMock()
+    res_ok = client.post(
+        f"/api/v1/estudios/{estudio.id}/turnos",
+        json={"centro_id": centro.id, "inicio": proximo_dia_habil(14, 30).isoformat()},
+        headers=headers_pac,
+    )
+    assert res_ok.status_code == 201
+    turno_id = res_ok.get_json()["data"]["turno_id"]
+    ruta_pdf = f"storage/turnos/orden_consentimiento_turno_{turno_id}.pdf"
+
+    with app.app_context():
+        almacenamiento_service.eliminar_archivo(ruta_pdf)
+        assert almacenamiento_service.leer_bytes(ruta_pdf) is None
+
+    res_pdf = client.get(f"/api/v1/turnos/{turno_id}/consentimiento-pdf", headers=headers_pac)
+    assert res_pdf.status_code == 200
+    assert res_pdf.data.startswith(b"%PDF-")
+
+    with app.app_context():
+        regenerado = almacenamiento_service.leer_bytes(ruta_pdf)
+        assert regenerado is not None
+        assert regenerado.startswith(b"%PDF-")

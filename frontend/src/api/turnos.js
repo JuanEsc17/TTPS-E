@@ -58,3 +58,51 @@ export function cancelarTurnoRequest({ token, turnoId }) {
         body: {},
     });
 }
+
+
+export async function descargarConsentimientoTurnoPdfRequest({ token, turnoId }) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    let resp;
+    try {
+        resp = await fetch(`/api/v1/turnos/${turnoId}/consentimiento-pdf`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal,
+        });
+    } catch (err) {
+        if (err?.name === "AbortError") {
+            throw new Error("La descarga demoró demasiado. Intentá nuevamente.", { cause: err });
+        }
+        throw new Error("No se pudo conectar con el servidor para descargar el PDF.", {
+            cause: err,
+        });
+    } finally {
+        clearTimeout(timer);
+    }
+
+    if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        const err = new Error(
+            data.error || "No se pudo descargar la Orden de extracción y Consentimiento informado."
+        );
+        err.code = data.code;
+        err.status = resp.status;
+        throw err;
+    }
+
+    const blob = await resp.blob();
+    const fallback = `orden_consentimiento_turno_${turnoId}.pdf`;
+    const disposition = resp.headers.get("Content-Disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const nombreArchivo = match?.[1]?.trim() || fallback;
+
+    const url = URL.createObjectURL(blob);
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = nombreArchivo;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return nombreArchivo;
+}

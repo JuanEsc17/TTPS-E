@@ -1,6 +1,6 @@
 # WORKFLOW: Escenario 7 – Solicitar un turno de extracción
-**Versión**: 1.1
-**Fecha**: 2026-11-17
+**Versión**: 1.2
+**Fecha**: 2026-11-25
 **Autor**: Workflow Architect & Software Architect
 **Estado**: Approved
 **Implementa**: `.ai/3-Escenarios.md#Escenario-7`
@@ -20,15 +20,15 @@
 
 ## Overview
 
-- **Objetivo**: Asignar un `Turno` de extracción de sangre de 15 minutos en uno de los 100 `Centros de extracción` del país para un `Paciente` cuyo `Estudio` está autorizado o pagado (o en remuestreo sin costo), cambiar el `Estudio` al estado `Turno sacado` y enviar al `Paciente` la `Orden de extracción`, el `Consentimiento informado` y el `Recordatorio`.
+- **Objetivo**: Asignar un `Turno` de extracción de sangre de 15 minutos en uno de los 100 `Centros de extracción` del país para un `Paciente` cuyo `Estudio` está autorizado o pagado (o en remuestreo sin costo), cambiar el `Estudio` al estado `Turno sacado`, generar y asociar al `Turno` el PDF unificado de `Orden de extracción` y `Consentimiento informado`, notificar su disponibilidad mediante un `Aviso` en la aplicación (`CanalAviso.APP`) y enviar el `Recordatorio` del turno.
 - **Contexto**: El `Estudio` ya fue `Autorizado` por la `Obra social` (Escenarios 4 o 5), o fue abonado de forma particular teniendo un `Pago` activo en estado `Creado` (Escenario 6), o requiere una nueva muestra sin costo por estar en `Remuestreo requerido` (Escenario 10), o el `Paciente` faltó de 1 a 4 veces a un turno previo (`ausencias < 5`, Escenario 33) y necesita reservar un nuevo `Turno`. Los `Turnos` son de 15 minutos, para una sola persona por centro y horario, de lunes a viernes de 09:00 a 18:00, excluyendo feriados.
-- **Recursos**: Mapa de `Centros de extracción` (`centros_extraccion`), agenda de `Turnos` (`turnos`), `Orden de extracción` (PDF/adjunto), plantilla de `Consentimiento informado` (PDF/adjunto que no se guarda en el sistema), `Recordatorio` por mail (con fecha, hora y advertencia del límite de `MAX_AUSENCIAS = 5` ausencias).
+- **Recursos**: Mapa de `Centros de extracción` (`centros_extraccion`), agenda de `Turnos` (`turnos`), archivo PDF de `Orden de extracción` y `Consentimiento informado` asociado al `Turno` (`storage/turnos/orden_consentimiento_turno_{turno_id}.pdf`), `Aviso` en la aplicación (`CanalAviso.APP`), `Recordatorio` por mail (con fecha, hora y advertencia del límite de `MAX_AUSENCIAS = 5` ausencias).
 - **Episodios**:
   1. El `Paciente` consulta los `Centros de extracción` disponibles en el mapa.
   2. El sistema muestra los `Centros de extracción` con sus coordenadas (`latitud`, `longitud`) y sus `Turnos` libres de 15 minutos (lunes a viernes de 09:00 a 18:00, sin feriados).
   3. El `Paciente` selecciona un `Centro de extracción`.
   4. El `Paciente` selecciona un `Turno` libre (`inicio`).
-  5. El sistema registra el `Turno` (`activo = True`), pasa el `Estudio` al estado `Turno sacado` (`EstadoEstudio.TURNO_SACADO`) y envía por mail al `Paciente` la `Orden de extracción`, el `Consentimiento informado` y el `Recordatorio`.
+  5. El sistema registra el `Turno` (`activo = True`), pasa el `Estudio` al estado `Turno sacado` (`EstadoEstudio.TURNO_SACADO`), genera y guarda junto al `Turno` el PDF de `Orden de extracción` y `Consentimiento informado` (descargable cuando el paciente lo desee), emite un `Aviso` in-app (`CanalAviso.APP`) para su descarga y envía el `Recordatorio` del turno.
 
 ---
 
@@ -36,11 +36,11 @@
 
 | Actor | Rol en este workflow |
 |---|---|
-| `Paciente` | Sujeto LEL que visualiza el mapa de `Centros de extracción`, elige un `Turno` libre y recibe la documentación para asistir a la extracción. |
-| `router` (`turnos_router`) | Capa HTTP Flask (`GET /api/v1/centros-extraccion`, `GET /api/v1/centros-extraccion/{centro_id}/disponibilidad` y `POST /api/v1/estudios/{estudio_id}/turnos`). |
-| `service` (`turno_service`) | Capa de negocio que valida horarios hábiles (lunes a viernes 09:00–18:00, múltiplos de 15 min, no feriado), verifica habilitación económica/estado del `Estudio`, crea el `Turno` y dispara el envío de documentos. |
-| `repo` (`turno_repo`, `estudio_repo`, `usuario_repo`) | Capa de acceso a datos SQLAlchemy sobre `centros_extraccion`, `turnos`, `estudios`, `pagos`, `avisos`. |
-| `clients` (`notificacion_client`) | Cliente de correo y generación de adjuntos para enviar la `Orden de extracción`, el `Consentimiento informado` y el `Recordatorio`. |
+| `Paciente` | Sujeto LEL que visualiza el mapa de `Centros de extracción`, elige un `Turno` libre, recibe el `Aviso` en la aplicación y descarga cuando lo necesite el PDF de `Orden de extracción` y `Consentimiento informado`. |
+| `router` (`turnos_router`) | Capa HTTP Flask (`GET /api/v1/centros-extraccion`, `GET /api/v1/centros-extraccion/{centro_id}/turnos-disponibles`, `POST /api/v1/estudios/{estudio_id}/turnos`, `GET /api/v1/turnos/{turno_id}/consentimiento-pdf`). |
+| `service` (`turno_service`) | Capa de negocio que valida horarios hábiles (lunes a viernes 09:00–18:00, múltiplos de 15 min, no feriado), verifica habilitación económica/estado del `Estudio`, crea el `Turno`, genera y guarda el PDF en `almacenamiento_service`, crea el `Aviso` in-app y dispara el `Recordatorio`. |
+| `repo` (`turno_repo`) | Capa de acceso a datos SQLAlchemy sobre `centros_extraccion`, `turnos`, `estudios`, `pagos`, `avisos`. |
+| `clients` (`email_client`, `almacenamiento_service`) | Servicio de almacenamiento de PDFs de turnos (`storage/turnos/orden_consentimiento_turno_{turno_id}.pdf`) y cliente de correo para el `Recordatorio`. |
 | `PostgreSQL` | Base de datos relacional que garantiza exclusión mutua del slot mediante el índice parcial único `uq_turno_activo` (`centro_id`, `inicio` donde `activo = True`). |
 
 ---
@@ -124,34 +124,35 @@
 
 ---
 
-### STEP 3: Envío de `Orden de extracción`, `Consentimiento informado` y `Recordatorio` al `Paciente`
-**Actor**: `service` (`turno_service`) -> `repo` (`usuario_repo`) + `clients` (`notificacion_client`)
+### STEP 3: Generación/guardado de PDF en el `Turno`, `Aviso` en la app y `Recordatorio`
+**Actor**: `service` (`turno_service` + `pdf_consentimiento`) -> `clients` (`almacenamiento_service`, `email_client`) -> `repo` (`turno_repo`)
 **Action**:
-1. Genera en memoria (sin guardar el consentimiento en la base de datos, tal como exige `.ai/2-Glosario_LEL.md` en `Objeto: Consentimiento informado`):
-   - **Orden de extracción**: Documento con fecha, hora (`inicio`), nombre y dirección del `Centro de extracción`, datos del `Paciente` y aclaración de que **no requiere ayuno ni preparación especial**.
-   - **Consentimiento informado**: Plantilla oficial para que el `Paciente` (o su padre/responsable si es menor de edad) imprima, complete, firme y entregue en el `Centro de extracción`.
-   - **Recordatorio**: Mensaje de correo electrónico con la fecha y hora del `Turno` y la advertencia expresa de que el límite máximo de inasistencias es de **5 ausencias** (`MAX_AUSENCIAS = 5`), tras lo cual perderá el pago.
-2. Inserta un `Aviso` en la tabla `avisos` (`usuario_id = estudio.paciente.usuario_id`, `canal = CanalAviso.MAIL`, `mensaje = f"Turno reservado para el {inicio} en {centro.nombre}. Recuerde que al acumular 5 ausencias perderá el pago del estudio."`).
-3. Envía el correo electrónico con la `Orden de extracción`, el `Consentimiento informado` y el `Recordatorio`, marca `avisos.enviado = True`, `avisos.enviado_en = func.now()` y hace `session.commit()`.
-**Timeout**: `6s` (con 2 reintentos de `1s` y `2s` para el despacho de correo).
+1. Genera el PDF A4 unificado (`construir_pdf_orden_y_consentimiento`) con los datos del `Turno`, `CentroExtraccion`, `Estudio`, `Paciente` y `Medico`:
+   - **Orden de extracción**: Determinaciones solicitadas, indicación expresa de que no requiere ayuno ni preparación especial y matrícula del profesional.
+   - **Consentimiento informado**: Plantilla formal con fecha/hora de extracción y bloques de aceptación/firma para que el `Paciente` (o su responsable legal) imprima, complete, firme y entregue en el `Centro de extracción`.
+2. Persiste el PDF asociado al `Turno` en `almacenamiento_service` bajo la ruta `storage/turnos/orden_consentimiento_turno_{turno.id}.pdf` para que el paciente pueda descargarlo cuando lo desee mediante `GET /api/v1/turnos/{turno_id}/consentimiento-pdf`.
+3. Inserta un **`Aviso` en la aplicación** (`canal = CanalAviso.APP`, `enviado = True`) indicando que la `Orden de extracción` y el `Consentimiento informado` (PDF) del `Turno #{turno.id}` (`Estudio #{estudio.id}`) están disponibles para descargar desde la app y desde **Mis turnos**.
+4. Inserta el `Aviso` de recordatorio (`canal = CanalAviso.MAIL`) y envía mediante `EmailClient` el `Recordatorio` del turno con fecha, hora, sede y la advertencia de `MAX_AUSENCIAS = 5` ausencias. Finalmente marca el aviso enviado y ejecuta `session.commit()`.
+**Timeout**: `6s`
 **Input**: `Turno`, `Estudio`, `CentroExtraccion`, `Paciente`.
-**Output on SUCCESS**: Respuesta `201 Created` con los datos del `Turno` y confirmación de envío -> `WORKFLOW COMPLETE`
+**Output on SUCCESS**: Respuesta `201 Created` con los datos del `Turno`, URL de descarga (`consentimiento_pdf_url`) y confirmación de emisión -> `WORKFLOW COMPLETE`
 **Output on FAILURE**:
-  - `FAILURE(transient_mail_error)`: Si el servidor SMTP falla tras los 2 reintentos -> `GO TO ABORT_CLEANUP` (o si se configura cola asíncrona, mantener `avisos.enviado = False`; por defecto en flujo síncrono hace rollback y devuelve `502 Bad Gateway` con `retryable: true` para garantizar que el paciente reciba la `Orden de extracción` y el `Consentimiento informado`).
+  - `FAILURE(storage_or_mail_error)`: Si falla el almacenamiento del PDF o el despacho de correo -> `GO TO ABORT_CLEANUP` (elimina el PDF si alcanzó a crearse, hace rollback de BD y retorna `502 Bad Gateway` con `retryable: true`).
 
 **Observable states during this step**:
-  - **Customer/Actor (`Paciente`) sees**: Confirmación `"Turno reservado con éxito"` mostrando fecha, hora, dirección del `Centro de extracción` en el mapa y aviso de que se enviaron a su correo la `Orden de extracción`, el `Consentimiento informado` y el `Recordatorio`.
-  - **Operator sees**: `Estudio` en estado `Turno sacado` con turno activo.
-  - **Database**: `turnos` (`activo = True`), `estudios` (`estado = EstadoEstudio.TURNO_SACADO`), `avisos` (`enviado = True`). *(El `Consentimiento informado` NO se almacena en la base de datos).*
-  - **Logs**: `[turno_service] STEP 3 completado turno_id=<tid> documentos_enviados=True`
+  - **Customer/Actor (`Paciente`) sees**: Ticket de confirmación con botón `"Descargar Orden y Consentimiento (PDF)"`, aviso nuevo en la campana con descarga directa y recordatorio por correo; además puede volver a descargarlo cuando quiera desde `"Mis turnos"`.
+  - **Operator sees**: `Estudio` en estado `Turno sacado` con turno activo y archivo `storage/turnos/orden_consentimiento_turno_{turno_id}.pdf`.
+  - **Database**: `turnos` (`activo = True`), `estudios` (`estado = EstadoEstudio.TURNO_SACADO`), `avisos` (`CanalAviso.APP` y `CanalAviso.MAIL`, `enviado = True`).
+  - **Logs**: `[turno_service] STEP 3 completado turno_id=<tid> pdf_guardado=True`
 
 ---
 
 ### ABORT_CLEANUP: Reversión de reserva de turno
-**Triggered by**: Fallo de base de datos en `STEP 2` o fallo definitivo de envío de documentación en `STEP 3`.
+**Triggered by**: Fallo de base de datos en `STEP 2` o fallo de almacenamiento/envío en `STEP 3`.
 **Actions**:
-  1. Ejecutar `session.rollback()` liberando el slot `(centro_id, inicio)` en la tabla `turnos` y restaurando `estudios.estado` a su valor previo (`CREADO`, `AUTORIZADO` o `REMUESTREO_REQUERIDO`).
-  2. Registrar el error en logs y retornar respuesta HTTP de error con `retryable: true`.
+  1. Eliminar el PDF del turno mediante `almacenamiento_service.eliminar_archivo(...)` si ya había sido guardado.
+  2. Ejecutar `session.rollback()` liberando el slot `(centro_id, inicio)` en la tabla `turnos` y restaurando `estudios.estado` a su valor previo (`CREADO`, `AUTORIZADO` o `REMUESTREO_REQUERIDO`).
+  3. Registrar el error en logs y retornar respuesta HTTP de error con `retryable: true`.
 **What customer (`Paciente`) sees**: Mensaje de error indicando que no se pudo completar la reserva del turno y que el horario sigue disponible para reintentar.
 **What operator sees**: Log de error; slot liberado en `turnos`.
 
@@ -233,10 +234,13 @@
     "estado_estudio": "Turno sacado",
     "ausencias_acumuladas": 0,
     "max_ausencias": 5,
+    "consentimiento_pdf_url": "/api/v1/turnos/501/consentimiento-pdf",
     "documentacion_enviada": {
       "orden_extraccion": true,
       "consentimiento_informado": true,
-      "recordatorio": true
+      "recordatorio": true,
+      "canal_pdf": "app",
+      "pdf_url": "/api/v1/turnos/501/consentimiento-pdf"
     }
   }
 }
@@ -255,13 +259,21 @@
 
 ---
 
+### 3. Frontend Paciente -> Backend (Descarga de Orden y Consentimiento PDF)
+**Endpoint**: `GET /api/v1/turnos/{turno_id}/consentimiento-pdf` (autenticado con rol `paciente` titular del turno)
+**Success response** (`200 OK`, `Content-Type: application/pdf`): binario PDF con `Content-Disposition: attachment; filename="orden_consentimiento_turno_{turno_id}.pdf"` (regenerado bajo demanda si no existiera en almacenamiento).
+**Failure response**: `401` / `403` (`FORBIDDEN_NOT_OWNER`) / `404` (`RECURSO_NO_ENCONTRADO`).
+
+---
+
 ## Cleanup Inventory
 
 | Resource | Created at step | Destroyed by | Destroy method |
 |---|---|---|---|
 | Registro en `turnos` (`activo = True`) | STEP 2 | `ABORT_CLEANUP` | `session.rollback()` |
 | Cambio de `estudios.estado` a `TURNO_SACADO` | STEP 2 | `ABORT_CLEANUP` | `session.rollback()` |
-| Registro en `avisos` | STEP 3 | `ABORT_CLEANUP` | `session.rollback()` |
+| Archivo `storage/turnos/orden_consentimiento_turno_{turno_id}.pdf` | STEP 3 | `ABORT_CLEANUP` | `almacenamiento_service.eliminar_archivo(...)` |
+| Registros en `avisos` (`APP` y `MAIL`) | STEP 3 | `ABORT_CLEANUP` | `session.rollback()` |
 
 ---
 
@@ -270,7 +282,7 @@
 | # | Finding | Severity | Spec section affected | Resolution |
 |---|---|---|---|---|
 | RC-1 | En `app/src/core/models/turnos.py`, `Turno` define el índice parcial único `Index("uq_turno_activo", "centro_id", "inicio", unique=True, sqlite_where=text("activo"), postgresql_where=text("activo"))`. Esto garantiza en PostgreSQL y SQLite (tests) que no puedan existir dos turnos activos en el mismo centro y horario, pero permite reutilizar el slot si el turno anterior fue cancelado (`activo = False`). | Low | STEP 2 | Aprovechado directamente en STEP 2 para control de concurrencia. |
-| RC-2 | Según `.ai/2-Glosario_LEL.md` (`Objeto: Consentimiento informado`), el consentimiento informado se envía al paciente al sacar turno pero *"se gestiona fuera del sistema y no se guarda en él"*. En `app/src/core/models/` efectivamente no existe columna ni tabla para guardar el consentimiento informado. | Low | STEP 3 | Documentado explícitamente que se genera y adjunta al mail sin persistirse en BD. |
+| RC-2 | En lugar de adjuntar la `Orden de extracción` y el `Consentimiento informado` por correo electrónico, el archivo PDF se genera y persiste en `almacenamiento_service` asociado al `Turno` (`storage/turnos/orden_consentimiento_turno_{turno_id}.pdf`) sin alterar el esquema de tablas PostgreSQL, se notifica en la aplicación mediante `CanalAviso.APP` y queda disponible para descargar en cualquier momento. | Low | STEP 3 | Implementado mediante `pdf_consentimiento.py`, `almacenamiento_service` y `GET /api/v1/turnos/{turno_id}/consentimiento-pdf`. |
 
 ---
 
@@ -278,12 +290,13 @@
 
 | Test | Trigger | Expected behavior |
 |---|---|---|
-| **TC-01: Happy path reserva de turno en estudio Autorizado** | `POST /api/v1/estudios/{id}/turnos` en día hábil a las `10:15:00` para un estudio en `EstadoEstudio.AUTORIZADO`. | Retorna `201 Created`; crea `Turno` (`activo=True`, `asistio=None`); cambia `Estudio.estado` a `EstadoEstudio.TURNO_SACADO`; envía `Orden de extracción`, `Consentimiento informado` y `Recordatorio`. |
+| **TC-01: Happy path reserva de turno en estudio Autorizado** | `POST /api/v1/estudios/{id}/turnos` en día hábil a las `10:15:00` para un estudio en `EstadoEstudio.AUTORIZADO`. | Retorna `201 Created`; crea `Turno` (`activo=True`, `asistio=None`); cambia `Estudio.estado` a `EstadoEstudio.TURNO_SACADO`; guarda PDF en `storage/turnos/orden_consentimiento_turno_{id}.pdf`, emite `Aviso(CanalAviso.APP)` y envía `Recordatorio` por correo. |
 | **TC-02: Happy path reserva de turno en estudio Creado con pago particular activo** | `POST /api/v1/estudios/{id}/turnos` para un estudio en `Creado` que tiene `Pago` con `anulado == False`. | Retorna `201 Created`; `Estudio.estado` pasa a `EstadoEstudio.TURNO_SACADO`. |
 | **TC-03: Happy path reserva de turno en estado Remuestreo requerido (sin nuevo pago)** | `POST /api/v1/estudios/{id}/turnos` para un estudio en `EstadoEstudio.REMUESTREO_REQUERIDO`. | Retorna `201 Created`; `Estudio.estado` pasa a `EstadoEstudio.TURNO_SACADO` sin exigir nuevo pago. |
 | **TC-04: Colisión concurrente en el mismo centro y horario** | Dos pacientes solicitan simultáneamente `centro_id = 14` e `inicio = "2026-11-02T09:15:00"`. | El primero recibe `201 Created`; el segundo recibe `409 Conflict` (`code: "TURNO_OCUPADO"`) gracias a `uq_turno_activo`. |
 | **TC-05: Rechazo por horario fuera de franja (antes de las 9, después de las 18, fin de semana o feriado)** | `POST /api/v1/estudios/{id}/turnos` un sábado, un feriado o a las `18:30:00` o `09:07:00`. | Retorna `422 Unprocessable Entity` (`code: "HORARIO_TURNO_INVALIDO"`); 0 filas creadas en `turnos`. |
 | **TC-06: Rechazo por estudio impago / no autorizado** | `POST /api/v1/estudios/{id}/turnos` en un estudio en `Creado` sin `Pago` o en `Pendiente de autorización` o `Rechazado`. | Retorna `409 Conflict` (`code: "ESTUDIO_NO_HABILITADO_TURNO"`). |
+| **TC-07: Descarga de Orden y Consentimiento PDF del turno** | `GET /api/v1/turnos/{turno_id}/consentimiento-pdf` autenticado como el paciente titular (o regeneración si faltara el archivo). | Retorna `200 OK` con `Content-Type: application/pdf` y binario `%PDF-`; `403` para otro paciente; `404` para turno inexistente. |
 
 ---
 
@@ -303,3 +316,4 @@
 |---|---|---|
 | 2026-10-28 | Especificación inicial creada y verificada contra `app/src/core/models/turnos.py` y `estudios.py`. | Marcada como `Approved`. |
 | 2026-11-17 | Adaptación v1.1 por Requerimientos 1 y 6: habilitación con `Pago.estado in (PAGADO, PARCIAL)` (cuota #1 abonada en MercadoPago) y registro en `registro_modificaciones` al pasar a `TURNO_SACADO`. | Especificación actualizada (ver ADR-001 y ADR-003). |
+| 2026-11-25 | Adaptación v1.2: generación y guardado de Orden de extracción y Consentimiento informado PDF asociado al `Turno`, emisión de `Aviso(CanalAviso.APP)` para descargarlo en la app y endpoint `GET /api/v1/turnos/{turno_id}/consentimiento-pdf`. | Especificación actualizada. |

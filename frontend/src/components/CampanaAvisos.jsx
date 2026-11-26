@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { listarAvisosRequest } from "../api/resultados";
+import { descargarConsentimientoTurnoPdfRequest } from "../api/turnos";
 
 const ROLES_CON_ENLACE_RESULTADO = new Set([
     "paciente",
@@ -27,6 +28,8 @@ export default function CampanaAvisos({ sesion }) {
 
     const [abierto, setAbierto] = useState(false);
     const [recargaId, setRecargaId] = useState(0);
+    const [descargandoTurnoId, setDescargandoTurnoId] = useState(null);
+    const [errorDescarga, setErrorDescarga] = useState("");
     const claveActual = `${token || ""}:${recargaId}`;
     const [estadoCarga, setEstadoCarga] = useState({
         clave: null,
@@ -98,6 +101,21 @@ export default function CampanaAvisos({ sesion }) {
     const mismoUsuario = estadoCarga.token === token;
     const cargando = Boolean(token) && estadoCarga.clave !== claveActual;
     const noLeidos = mismoUsuario ? estadoCarga.noLeidos : 0;
+
+    async function handleDescargarConsentimiento(turnoId) {
+        if (!token || !turnoId || descargandoTurnoId) return;
+        setDescargandoTurnoId(turnoId);
+        setErrorDescarga("");
+        try {
+            await descargarConsentimientoTurnoPdfRequest({ token, turnoId });
+        } catch (err) {
+            setErrorDescarga(
+                err?.message || "No se pudo descargar el PDF de consentimiento."
+            );
+        } finally {
+            setDescargandoTurnoId(null);
+        }
+    }
     const avisos = mismoUsuario ? estadoCarga.avisos : [];
     const error = estadoCarga.clave === claveActual ? estadoCarga.error : "";
 
@@ -205,10 +223,12 @@ export default function CampanaAvisos({ sesion }) {
                                         rol === "bioinformatico" &&
                                         !esResultado &&
                                         /reanalisis|bioinformatic/i.test(aviso.mensaje || "");
-                                    const esRemuestreo =
+                                    const esSolicitarTurno =
                                         rol === "paciente" &&
                                         !esResultado &&
-                                        /remuestreo/i.test(aviso.mensaje || "");
+                                        /remuestreo|solicitar (?:un )?(?:nuevo )?turno/i.test(
+                                            aviso.mensaje || ""
+                                        );
                                     const esAutorizacionHistoria =
                                         (rol === "medico" || rol === "gerente_medico") &&
                                         !esResultado &&
@@ -253,9 +273,42 @@ export default function CampanaAvisos({ sesion }) {
                                                     >
                                                         Ir a bandeja →
                                                     </Link>
-                                                ) : esRemuestreo ? (
+                                                ) : rol === "paciente" &&
+                                                  Boolean(aviso.turno_id) &&
+                                                  /consentimiento|orden de extracci[oó]n/i.test(
+                                                      aviso.mensaje || ""
+                                                  ) ? (
+                                                    <div className="flex flex-col items-end gap-1">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() =>
+                                                                handleDescargarConsentimiento(
+                                                                    aviso.turno_id
+                                                                )
+                                                            }
+                                                            disabled={
+                                                                descargandoTurnoId ===
+                                                                aviso.turno_id
+                                                            }
+                                                            className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] disabled:opacity-60"
+                                                        >
+                                                            {descargandoTurnoId === aviso.turno_id
+                                                                ? "Descargando..."
+                                                                : "Descargar PDF →"}
+                                                        </button>
+                                                        {errorDescarga && (
+                                                            <span className="text-[10px] text-red-600">
+                                                                {errorDescarga}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                ) : esSolicitarTurno ? (
                                                     <Link
-                                                        to="/paciente/turno"
+                                                        to={
+                                                            aviso.estudio_id
+                                                                ? `/paciente/estudios/${aviso.estudio_id}/turno`
+                                                                : "/paciente/turno"
+                                                        }
                                                         onClick={() => setAbierto(false)}
                                                         className="font-semibold text-[#0B4F8A] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A]"
                                                     >

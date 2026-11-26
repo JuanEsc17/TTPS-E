@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import {
     cancelarTurnoRequest,
+    descargarConsentimientoTurnoPdfRequest,
     listarCentrosRequest,
     listarMisEstudiosRequest,
     obtenerDisponibilidadRequest,
@@ -35,6 +36,18 @@ function aIsoFechaLocal(fecha) {
     const m = String(fecha.getMonth() + 1).padStart(2, "0");
     const d = String(fecha.getDate()).padStart(2, "0");
     return `${y}-${m}-${d}`;
+}
+
+function sumarMesesAFechaLocal(fecha, meses) {
+    const diaOriginal = fecha.getDate();
+    const resultado = new Date(fecha.getFullYear(), fecha.getMonth() + meses, 1);
+    const ultimoDiaMes = new Date(
+        resultado.getFullYear(),
+        resultado.getMonth() + 1,
+        0
+    ).getDate();
+    resultado.setDate(Math.min(diaOriginal, ultimoDiaMes));
+    return resultado;
 }
 
 function esDiaHabil(fecha) {
@@ -113,6 +126,7 @@ export default function SolicitarTurnoPage({ sesion }) {
 
     const diasSugeridos = useMemo(() => generarProximosDiasHabiles(5), []);
     const fechaMinima = diasSugeridos[0]?.iso || "";
+    const fechaMaxima = useMemo(() => aIsoFechaLocal(sumarMesesAFechaLocal(new Date(), 4)), []);
 
     const [misEstudios, setMisEstudios] = useState([]);
     const [estudioSeleccionadoId, setEstudioSeleccionadoId] = useState(estudioSolicitadoId);
@@ -128,6 +142,7 @@ export default function SolicitarTurnoPage({ sesion }) {
     const [slotSeleccionadoIso, setSlotSeleccionadoIso] = useState("");
 
     const [confirmando, setConfirmando] = useState(false);
+    const [descargandoPdf, setDescargandoPdf] = useState(false);
     const [confirmarCancelacion, setConfirmarCancelacion] = useState(false);
     const [cancelando, setCancelando] = useState(false);
 
@@ -184,6 +199,11 @@ export default function SolicitarTurnoPage({ sesion }) {
 
     const turnoActivo = estudioActual?.turno_activo || null;
     const puedeReservarEstudio = Boolean(estudioActual?.habilitado_para_turno && !turnoActivo);
+    const fechaFueraDeRango = Boolean(
+        fechaSeleccionada &&
+            ((fechaMinima && fechaSeleccionada < fechaMinima) ||
+                (fechaMaxima && fechaSeleccionada > fechaMaxima))
+    );
 
     // Cargar disponibilidad cuando cambia el centro o la fecha (y el estudio admite reserva)
     useEffect(() => {
@@ -192,6 +212,7 @@ export default function SolicitarTurnoPage({ sesion }) {
             !esPaciente ||
             !centroSeleccionadoId ||
             !fechaSeleccionada ||
+            fechaFueraDeRango ||
             turnoActivo ||
             !puedeReservarEstudio
         ) {
@@ -229,7 +250,7 @@ export default function SolicitarTurnoPage({ sesion }) {
         return () => {
             cancelado = true;
         };
-    }, [token, esPaciente, centroSeleccionadoId, fechaSeleccionada, turnoActivo, puedeReservarEstudio]);
+    }, [token, esPaciente, centroSeleccionadoId, fechaSeleccionada, fechaFueraDeRango, turnoActivo, puedeReservarEstudio]);
 
     const centrosFiltrados = useMemo(() => {
         const q = busquedaCentro.trim().toLowerCase();
@@ -303,12 +324,32 @@ export default function SolicitarTurnoPage({ sesion }) {
                 inicio: slotSeleccionadoIso,
             });
             await recargarEstudios();
+            window.dispatchEvent(new CustomEvent("avisos:actualizar"));
             setConfirmarCancelacion(false);
-            setAviso("Turno reservado con éxito. Enviamos la documentación y recordatorio a tu correo.");
+            setAviso(
+                "Turno reservado con éxito. Te enviamos la Orden y Consentimiento (PDF) como aviso en la app y quedó guardado en el turno."
+            );
         } catch (err) {
             setError(err.message);
         } finally {
             setConfirmando(false);
+        }
+    }
+
+    async function handleDescargarConsentimientoPdf() {
+        if (!token || !turnoActivo?.turno_id || descargandoPdf) return;
+        setDescargandoPdf(true);
+        setError("");
+        try {
+            const nombreArchivo = await descargarConsentimientoTurnoPdfRequest({
+                token,
+                turnoId: turnoActivo.turno_id,
+            });
+            setAviso(`Descargaste "${nombreArchivo}" con tu Orden de extracción y Consentimiento informado.`);
+        } catch (err) {
+            setError(err?.message || "No se pudo descargar el PDF del turno.");
+        } finally {
+            setDescargandoPdf(false);
         }
     }
 
@@ -626,22 +667,34 @@ export default function SolicitarTurnoPage({ sesion }) {
                         <div className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200/80 bg-white/85 p-5 lg:col-span-5">
                             <div>
                                 <h3 className="text-sm font-semibold text-slate-900">
-                                    Documentación enviada a tu correo
+                                    Documentación del turno lista en la app
                                 </h3>
                                 <ul className="mt-3 space-y-2 text-xs text-slate-600">
                                     <li className="flex items-center gap-2">
                                         <span className="font-bold text-emerald-600">✓</span>
-                                        Orden de extracción médica
+                                        Orden de extracción médica (PDF guardado en tu turno)
                                     </li>
                                     <li className="flex items-center gap-2">
                                         <span className="font-bold text-emerald-600">✓</span>
-                                        Plantilla de Consentimiento informado (llevar impresa y firmada)
+                                        Consentimiento informado (llevar impreso y firmado)
                                     </li>
                                     <li className="flex items-center gap-2">
                                         <span className="font-bold text-emerald-600">✓</span>
                                         No requiere ayuno ni preparación especial
                                     </li>
                                 </ul>
+                                <div className="mt-4">
+                                    <button
+                                        type="button"
+                                        onClick={handleDescargarConsentimientoPdf}
+                                        disabled={descargandoPdf}
+                                        className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#0B4F8A] px-3.5 py-2 text-xs font-semibold text-white transition hover:bg-[#093E6D] disabled:opacity-60"
+                                    >
+                                        {descargandoPdf
+                                            ? "Descargando PDF..."
+                                            : "Descargar Orden y Consentimiento (PDF)"}
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="border-t border-slate-200 pt-4">
@@ -805,7 +858,7 @@ export default function SolicitarTurnoPage({ sesion }) {
                                             Fecha y horario
                                         </h2>
                                         <p className="text-xs text-slate-500">
-                                            Turnos de 15 min · Lun a vie · 09:00 a 18:00 hs.
+                                            Turnos de 15 min · Lun a vie · 09:00 a 18:00 hs · Hasta 4 meses.
                                         </p>
                                     </div>
                                 </div>
@@ -846,11 +899,20 @@ export default function SolicitarTurnoPage({ sesion }) {
                                             id="selector-fecha-turno"
                                             type="date"
                                             min={fechaMinima}
+                                            max={fechaMaxima}
                                             value={fechaSeleccionada}
-                                            onChange={(e) => setFechaSeleccionada(e.target.value)}
+                                            onChange={(e) => {
+                                                setFechaSeleccionada(e.target.value);
+                                                setSlotSeleccionadoIso("");
+                                            }}
                                             className="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 focus:border-[#0B4F8A] focus:outline-none"
                                         />
                                     </div>
+                                    {fechaFueraDeRango && (
+                                        <p className="text-[11px] font-medium text-amber-700">
+                                            Solo podés elegir fechas desde hoy hasta 4 meses después ({fechaMaxima}).
+                                        </p>
+                                    )}
                                 </div>
 
                                 {/* Grilla de slots disponibles */}
@@ -862,11 +924,17 @@ export default function SolicitarTurnoPage({ sesion }) {
                                         <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
                                             {cargandoSlots
                                                 ? "Consultando..."
-                                                : `${slotsLibresIso.length} libres`}
+                                                : fechaFueraDeRango
+                                                    ? "0 libres"
+                                                    : `${slotsLibresIso.length} libres`}
                                         </span>
                                     </div>
 
-                                    {cargandoSlots ? (
+                                    {fechaFueraDeRango ? (
+                                        <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/70 p-4 text-center text-xs text-amber-800">
+                                            La fecha seleccionada supera el rango permitido (hasta 4 meses desde hoy). Elegí una fecha dentro del calendario habilitado.
+                                        </div>
+                                    ) : cargandoSlots ? (
                                         <div className="grid grid-cols-4 gap-2">
                                             {Array.from({ length: 8 }).map((_, i) => (
                                                 <div

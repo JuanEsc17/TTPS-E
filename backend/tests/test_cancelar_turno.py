@@ -189,6 +189,13 @@ def test_cancelar_turno_paciente_titular_obra_social(app, client, session, datos
     assert aviso.enviado is True
     assert "cancelado" in aviso.mensaje.lower()
 
+    # El estudio vuelve a figurar habilitado en Mis estudios (/api/estudios/mis-estudios)
+    res_mis = client.get("/api/estudios/mis-estudios", headers=headers)
+    assert res_mis.status_code == 200
+    est_mis = next(e for e in res_mis.get_json()["estudios"] if e["estudio_id"] == estudio.id)
+    assert est_mis["estado"] == EstadoEstudio.AUTORIZADO.value
+    assert est_mis["habilitado_para_turno"] is True
+
 
 def test_cancelar_turno_libera_slot_y_permite_sacar_nuevo_turno(
     app, client, session, datos_cancelacion
@@ -279,6 +286,12 @@ def test_cancelar_turno_estudio_pago_particular_vuelve_a_creado(
 
     session.refresh(estudio)
     assert estudio.estado == EstadoEstudio.CREADO
+
+    res_mis = client.get("/api/estudios/mis-estudios", headers=headers)
+    assert res_mis.status_code == 200
+    est_mis = next(e for e in res_mis.get_json()["estudios"] if e["estudio_id"] == estudio.id)
+    assert est_mis["estado"] == EstadoEstudio.CREADO.value
+    assert est_mis["habilitado_para_turno"] is True
 
     nuevo_horario = _proximo_dia_habil(11, 30)
     res_nuevo = client.post(

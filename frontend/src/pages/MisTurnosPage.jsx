@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { cancelarTurnoRequest, listarMisTurnosRequest } from "../api/turnos";
+import {
+    cancelarTurnoRequest,
+    descargarConsentimientoTurnoPdfRequest,
+    listarMisTurnosRequest,
+} from "../api/turnos";
 
 const ESTILOS_ESTADO = {
     Confirmado: "border-cyan-200 bg-cyan-50 text-[#0B4F8A]",
@@ -81,9 +85,24 @@ export default function MisTurnosPage({ sesion }) {
     const [seleccionadoId, setSeleccionadoId] = useState(null);
     const [confirmandoCancelId, setConfirmandoCancelId] = useState(null);
     const [cancelandoId, setCancelandoId] = useState(null);
+    const [descargandoPdfId, setDescargandoPdfId] = useState(null);
     const [estudioCanceladoId, setEstudioCanceladoId] = useState(null);
     const [error, setError] = useState("");
     const [aviso, setAviso] = useState("");
+
+    async function handleDescargarConsentimientoPdf(turnoId) {
+        if (!token || !turnoId || descargandoPdfId) return;
+        setDescargandoPdfId(turnoId);
+        setError("");
+        try {
+            const nombreArchivo = await descargarConsentimientoTurnoPdfRequest({ token, turnoId });
+            setAviso(`Descargaste "${nombreArchivo}" con tu Orden de extracción y Consentimiento informado.`);
+        } catch (err) {
+            setError(err?.message || "No se pudo descargar el PDF del turno.");
+        } finally {
+            setDescargandoPdfId(null);
+        }
+    }
 
     useEffect(() => {
         if (!token || !esPaciente) return;
@@ -518,6 +537,34 @@ export default function MisTurnosPage({ sesion }) {
                                             </div>
                                         );
                                     })()}
+
+                                {(turnoDetalle.estado_turno === "Confirmado" ||
+                                    turnoDetalle.estado_turno === "Asistido") && (
+                                    <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-3.5 text-xs text-slate-700">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div>
+                                                <p className="font-semibold text-slate-900">
+                                                    Orden de extracción y Consentimiento (PDF)
+                                                </p>
+                                                <p className="mt-0.5 text-[11px] text-slate-500">
+                                                    Documento guardado con este turno para imprimir y firmar.
+                                                </p>
+                                            </div>
+                                            <button
+                                                type="button"
+                                                onClick={() =>
+                                                    handleDescargarConsentimientoPdf(turnoDetalle.turno_id)
+                                                }
+                                                disabled={descargandoPdfId === turnoDetalle.turno_id}
+                                                className="inline-flex items-center gap-1.5 rounded-lg bg-[#0B4F8A] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#093E6D] disabled:opacity-60"
+                                            >
+                                                {descargandoPdfId === turnoDetalle.turno_id
+                                                    ? "Descargando..."
+                                                    : "Descargar PDF"}
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
 
                                 {turnoDetalle.estado_turno === "Confirmado" && (
                                     <div className="rounded-xl border border-cyan-200/80 bg-cyan-50/70 p-3.5 text-xs text-slate-700">
