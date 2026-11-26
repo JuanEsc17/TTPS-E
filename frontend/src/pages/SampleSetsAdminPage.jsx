@@ -209,11 +209,10 @@ export default function SampleSetsAdminPage({ sesion }) {
                                     setFiltroEstado(f.value);
                                     setErrorDetalle("");
                                 }}
-                                className={`rounded-xl border px-3.5 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] ${
-                                    activo
-                                        ? "border-[#0B4F8A] bg-[#0B4F8A] text-white shadow-xs"
-                                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                                }`}
+                                className={`rounded-xl border px-3.5 py-2 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] ${activo
+                                    ? "border-[#0B4F8A] bg-[#0B4F8A] text-white shadow-xs"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                    }`}
                             >
                                 {f.label}
                             </button>
@@ -283,11 +282,10 @@ export default function SampleSetsAdminPage({ sesion }) {
                                         <button
                                             type="button"
                                             onClick={() => handleElegirSampleSet(ss.id)}
-                                            className={`w-full rounded-xl border p-3.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] ${
-                                                seleccionado
-                                                    ? "border-[#0B4F8A] bg-[#EAF2FA]/60"
-                                                    : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/70"
-                                            }`}
+                                            className={`w-full rounded-xl border p-3.5 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#0B4F8A] ${seleccionado
+                                                ? "border-[#0B4F8A] bg-[#EAF2FA]/60"
+                                                : "border-slate-200 hover:border-slate-300 hover:bg-slate-50/70"
+                                                }`}
                                         >
                                             <div className="flex flex-wrap items-center justify-between gap-2">
                                                 <span className="text-sm font-semibold text-slate-900">
@@ -300,10 +298,9 @@ export default function SampleSetsAdminPage({ sesion }) {
                                                         </span>
                                                     )}
                                                     <span
-                                                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                                                            ESTILO_ESTADO[ss.estado] ||
+                                                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${ESTILO_ESTADO[ss.estado] ||
                                                             "border-slate-200 bg-slate-100 text-slate-700"
-                                                        }`}
+                                                            }`}
                                                     >
                                                         {ETIQUETA_ESTADO[ss.estado] || ss.estado}
                                                     </span>
@@ -324,13 +321,12 @@ export default function SampleSetsAdminPage({ sesion }) {
 
                                             <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                                                 <div
-                                                    className={`h-full rounded-full transition-all ${
-                                                        ss.es_pompe_urgente
-                                                            ? "bg-red-500"
-                                                            : ss.estado === "abierto"
-                                                              ? "bg-[#0891B2]"
-                                                              : "bg-emerald-600"
-                                                    }`}
+                                                    className={`h-full rounded-full transition-all ${ss.es_pompe_urgente
+                                                        ? "bg-red-500"
+                                                        : ss.estado === "abierto"
+                                                            ? "bg-[#0891B2]"
+                                                            : "bg-emerald-600"
+                                                        }`}
                                                     style={{ width: `${porcentaje}%` }}
                                                 />
                                             </div>
@@ -373,10 +369,9 @@ export default function SampleSetsAdminPage({ sesion }) {
                                     </p>
                                 </div>
                                 <span
-                                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                                        ESTILO_ESTADO[sampleSetDetalle.estado] ||
+                                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${ESTILO_ESTADO[sampleSetDetalle.estado] ||
                                         "border-slate-200 bg-slate-100 text-slate-700"
-                                    }`}
+                                        }`}
                                 >
                                     {ETIQUETA_ESTADO[sampleSetDetalle.estado] ||
                                         sampleSetDetalle.estado}
@@ -428,7 +423,7 @@ export default function SampleSetsAdminPage({ sesion }) {
                                 </h3>
 
                                 {!sampleSetDetalle.muestras ||
-                                sampleSetDetalle.muestras.length === 0 ? (
+                                    sampleSetDetalle.muestras.length === 0 ? (
                                     <p className="mt-3 rounded-xl border border-dashed border-slate-200 p-4 text-xs text-slate-500">
                                         Este sample-set aún no tiene muestras detalladas.
                                     </p>
